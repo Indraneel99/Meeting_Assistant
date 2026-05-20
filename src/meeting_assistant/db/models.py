@@ -20,6 +20,7 @@ class WorkflowStatus(StrEnum):
     PENDING = "pending"
     VALIDATED = "validated"
     EXECUTING = "executing"
+    AWAITING_APPROVAL = "awaiting_approval"
     DONE = "done"
     FAILED = "failed"
 
@@ -119,9 +120,11 @@ class WorkflowRun(Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    iteration_count: Mapped[int] = mapped_column(Integer, default=0)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="workflow_runs")
     tool_executions: Mapped[list["ToolExecution"]] = relationship(back_populates="workflow_run")
+    agent_steps: Mapped[list["AgentStep"]] = relationship(back_populates="workflow_run")
 
 
 class TaskItem(Base):
@@ -178,3 +181,18 @@ class ToolExecutionAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     tool_execution: Mapped["ToolExecution"] = relationship(back_populates="attempts")
+
+
+class AgentStep(Base):
+    __tablename__ = "agent_steps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workflow_run_id: Mapped[int] = mapped_column(ForeignKey("workflow_runs.id"), index=True)
+    iteration: Mapped[int] = mapped_column(Integer)
+    step_kind: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    workflow_run: Mapped["WorkflowRun"] = relationship(back_populates="agent_steps")

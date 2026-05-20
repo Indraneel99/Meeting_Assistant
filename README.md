@@ -18,7 +18,7 @@ The current implementation is a modular monolith:
 - Transcript text can be provided directly, or audio files can be transcribed through a hosted OpenAI batch ASR adapter
 - Planning can run through a hosted OpenAI LLM with structured outputs, while keeping a local heuristic fallback for development
 - ASR, normalization, and chunking feed an internal queue abstraction
-- An orchestration service loads context, plans outputs, validates tool calls, and persists results
+- An orchestration service now runs a bounded agent loop with persisted step history, loop guards, and approval-aware pauses
 - Tool execution now includes idempotency keys, retry attempts, approval gating for calendar actions, and dead-letter style failure metadata
 - Retrieval endpoints expose recent memory, tasks, and decisions
 

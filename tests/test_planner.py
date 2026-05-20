@@ -4,7 +4,7 @@ import httpx
 
 from meeting_assistant.schemas.planner import PlanResult
 from meeting_assistant.services.context import ContextBundle
-from meeting_assistant.services.planner import HeuristicPlanner, OpenAIPlanner, PlannerRouter
+from meeting_assistant.services.planner import HeuristicPlanner, OpenAIPlanner, PlannerRouter, PlannerRuntimeState
 
 
 def test_heuristic_planner_extracts_basic_structure() -> None:
@@ -14,6 +14,7 @@ def test_heuristic_planner_extracts_basic_structure() -> None:
         "Weekly sync",
         "Decision: ship Friday. Action: send recap. Schedule a calendar check-in.",
         ContextBundle(recent_summaries=[], relevant_summaries=[]),
+        PlannerRuntimeState(iteration=1, max_iterations=3),
     )
 
     assert result.summary
@@ -58,6 +59,7 @@ def test_openai_planner_parses_structured_output() -> None:
         "Weekly sync",
         "Decision: ship Friday. Action: send recap.",
         ContextBundle(recent_summaries=["Previous launch slipped."], relevant_summaries=[]),
+        PlannerRuntimeState(iteration=1, max_iterations=3),
     )
 
     assert result == structured_plan
@@ -81,6 +83,7 @@ def test_planner_router_falls_back_when_primary_fails() -> None:
         "Weekly sync",
         "Action: send recap. Decision: keep the Friday launch.",
         ContextBundle(recent_summaries=[], relevant_summaries=[]),
+        PlannerRuntimeState(iteration=1, max_iterations=3),
     )
 
     assert result.summary

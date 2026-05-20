@@ -4,6 +4,7 @@ from meeting_assistant.container import Container
 from meeting_assistant.core.config import Settings
 from meeting_assistant.db.session import SessionLocal, initialize_database
 from meeting_assistant.repositories import Repository
+from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.asr import BatchASRAdapter, LocalAudioSourceResolver, OpenAIHostedASRClient
 from meeting_assistant.services.context import ContextLoader
 from meeting_assistant.services.embeddings import InMemoryEmbeddingIndex
@@ -55,23 +56,29 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         max_retries=settings.tool_execution_max_retries,
         backoff_seconds=settings.tool_execution_backoff_seconds,
     )
+    agent_runtime = AgentRuntime(
+        repository=repository,
+        planner=planner,
+        tool_validator=tool_validator,
+        tool_executor=tool_executor,
+        max_iterations=settings.max_tool_calls_per_session,
+    )
 
     orchestrator = BatchOrchestrator(
         repository=repository,
         queue=queue,
         asr=asr,
         normalizer=normalizer,
-        planner=planner,
         context_loader=context_loader,
         embedding_index=embedding_index,
-        tool_validator=tool_validator,
-        tool_executor=tool_executor,
+        agent_runtime=agent_runtime,
     )
     query_service = QueryService(repository, embedding_index)
 
     return Container(
         settings=settings,
         repository=repository,
+        agent_runtime=agent_runtime,
         orchestrator=orchestrator,
         query_service=query_service,
     )

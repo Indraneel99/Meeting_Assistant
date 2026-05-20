@@ -33,9 +33,10 @@ def test_batch_ingestion_and_retrieval() -> None:
         )
         assert ingest.status_code == 200
         payload = ingest.json()
-        assert payload["status"] == "done"
+        assert payload["status"] == "awaiting_approval"
         assert payload["tasks_created"] >= 1
         assert payload["decisions_logged"] >= 1
+        assert payload["iterations_used"] >= 1
         assert len(payload["tool_executions"]) == 2
         assert {item["status"] for item in payload["tool_executions"]} == {"executed", "approval_required"}
 

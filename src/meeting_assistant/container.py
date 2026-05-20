@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from meeting_assistant.core.config import Settings
 from meeting_assistant.repositories import Repository
+from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.orchestrator import BatchOrchestrator
 from meeting_assistant.services.query import QueryService
 
@@ -10,5 +11,6 @@ from meeting_assistant.services.query import QueryService
 class Container:
     settings: Settings
     repository: Repository
+    agent_runtime: AgentRuntime
     orchestrator: BatchOrchestrator
     query_service: QueryService

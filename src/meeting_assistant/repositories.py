@@ -8,6 +8,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from meeting_assistant.db.models import (
+    AgentStep,
     Decision,
     Meeting,
     MeetingChunk,
@@ -71,6 +72,16 @@ class Repository:
                 raise ValueError(f"Workflow run {workflow_run_id} not found")
             run.status = status
             run.failure_reason = failure_reason
+            session.commit()
+            session.refresh(run)
+            return run
+
+    def update_workflow_iteration_count(self, workflow_run_id: int, iteration_count: int) -> WorkflowRun:
+        with self.session_factory() as session:
+            run = session.get(WorkflowRun, workflow_run_id)
+            if run is None:
+                raise ValueError(f"Workflow run {workflow_run_id} not found")
+            run.iteration_count = iteration_count
             session.commit()
             session.refresh(run)
             return run
@@ -248,6 +259,38 @@ class Repository:
                 select(ToolExecution)
                 .where(ToolExecution.workflow_run_id == workflow_run_id)
                 .order_by(ToolExecution.id.asc())
+            )
+            return list(session.scalars(statement))
+
+    def create_agent_step(
+        self,
+        workflow_run_id: int,
+        iteration: int,
+        step_kind: str,
+        status: str,
+        payload_json: str,
+        result_json: str,
+    ) -> AgentStep:
+        with self.session_factory() as session:
+            step = AgentStep(
+                workflow_run_id=workflow_run_id,
+                iteration=iteration,
+                step_kind=step_kind,
+                status=status,
+                payload_json=payload_json,
+                result_json=result_json,
+            )
+            session.add(step)
+            session.commit()
+            session.refresh(step)
+            return step
+
+    def list_agent_steps(self, workflow_run_id: int) -> list[AgentStep]:
+        with self.session_factory() as session:
+            statement = (
+                select(AgentStep)
+                .where(AgentStep.workflow_run_id == workflow_run_id)
+                .order_by(AgentStep.id.asc())
             )
             return list(session.scalars(statement))
 

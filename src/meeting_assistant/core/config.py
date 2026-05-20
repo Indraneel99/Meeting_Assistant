@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,18 +10,28 @@ class Settings(BaseSettings):
     max_tool_calls_per_session: int = 10
     llm_provider: str = "openai"
     llm_fallback_provider: str = "heuristic"
-    llm_openai_api_key: str | None = None
+    llm_openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MEETING_ASSISTANT_LLM_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
     llm_openai_base_url: str = "https://api.openai.com/v1"
     llm_openai_model: str = "gpt-5.4-mini"
     llm_openai_timeout_seconds: float = 90.0
     tool_execution_max_retries: int = 3
     tool_execution_backoff_seconds: float = 1.0
     asr_provider: str = "openai"
-    asr_openai_api_key: str | None = None
+    asr_openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MEETING_ASSISTANT_ASR_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
     asr_openai_base_url: str = "https://api.openai.com/v1"
     asr_openai_model: str = "gpt-4o-transcribe-diarize"
     asr_openai_language: str | None = None
     asr_openai_timeout_seconds: float = 120.0
     asr_openai_chunking_strategy: str = "auto"
 
-    model_config = SettingsConfigDict(env_prefix="MEETING_ASSISTANT_")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="MEETING_ASSISTANT_",
+    )
