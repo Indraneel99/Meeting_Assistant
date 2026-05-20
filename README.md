@@ -1,0 +1,66 @@
+# Meeting Assistant
+
+This repository contains a batch-first meeting assistant scaffold that follows a production-shaped architecture while staying simple enough to iterate locally.
+
+## What is included
+
+- FastAPI service for batch meeting ingestion and retrieval
+- Durable workflow state in Postgres-compatible SQLAlchemy models
+- Queue, hybrid ASR, planner, tool execution, and embedding abstractions
+- Read-oriented retrieval endpoints that mirror the future real-time query service
+- Lightweight tests for the API and orchestration flow
+
+## Architecture notes
+
+The current implementation is a modular monolith:
+
+- Batch ingestion enters through the API
+- Transcript text can be provided directly, or audio files can be transcribed through a hosted OpenAI batch ASR adapter
+- Planning can run through a hosted OpenAI LLM with structured outputs, while keeping a local heuristic fallback for development
+- ASR, normalization, and chunking feed an internal queue abstraction
+- An orchestration service loads context, plans outputs, validates tool calls, and persists results
+- Tool execution now includes idempotency keys, retry attempts, approval gating for calendar actions, and dead-letter style failure metadata
+- Retrieval endpoints expose recent memory, tasks, and decisions
+
+The storage model is compatible with a future Postgres + pgvector deployment. Local development defaults to SQLite, while the vector layer is abstracted so a real pgvector-backed implementation can replace the in-process cosine similarity store.
+
+## Run locally
+
+```bash
+uv sync
+uv run uvicorn meeting_assistant.main:app --reload
+```
+
+To enable hosted batch ASR for `source_uri` inputs, set:
+
+```bash
+export MEETING_ASSISTANT_ASR_OPENAI_API_KEY="..."
+```
+
+Optional:
+
+```bash
+export MEETING_ASSISTANT_ASR_OPENAI_MODEL="gpt-4o-transcribe-diarize"
+export MEETING_ASSISTANT_ASR_OPENAI_LANGUAGE="en"
+```
+
+To enable hosted planning with structured outputs, set:
+
+```bash
+export MEETING_ASSISTANT_LLM_OPENAI_API_KEY="..."
+```
+
+Optional:
+
+```bash
+export MEETING_ASSISTANT_LLM_OPENAI_MODEL="gpt-5.4-mini"
+export MEETING_ASSISTANT_LLM_PROVIDER="openai"
+```
+
+If no LLM API key is configured, the app falls back to the local heuristic planner so you can keep testing offline.
+
+## Test
+
+```bash
+uv run pytest
+```
