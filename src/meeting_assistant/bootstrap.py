@@ -1,4 +1,5 @@
 import httpx
+from openai import OpenAI
 
 from meeting_assistant.container import Container
 from meeting_assistant.core.config import Settings
@@ -24,7 +25,6 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
     queue = InMemoryTranscriptQueue()
     embedding_index = InMemoryEmbeddingIndex()
     asr_http_client = httpx.Client(timeout=settings.asr_openai_timeout_seconds)
-    llm_http_client = httpx.Client(timeout=settings.llm_openai_timeout_seconds)
     source_resolver = LocalAudioSourceResolver(asr_http_client)
     hosted_asr = OpenAIHostedASRClient(
         api_key=settings.asr_openai_api_key,
@@ -38,12 +38,15 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
     normalizer = TranscriptNormalizer(settings.chunk_size_words)
     heuristic_planner = HeuristicPlanner()
     if settings.llm_provider == "openai" and settings.llm_openai_api_key:
+        llm_client = OpenAI(
+            api_key=settings.llm_openai_api_key,
+            base_url=settings.llm_openai_base_url,
+            timeout=settings.llm_openai_timeout_seconds,
+        )
         planner = PlannerRouter(
             primary=OpenAIPlanner(
-                api_key=settings.llm_openai_api_key,
-                base_url=settings.llm_openai_base_url,
                 model_name=settings.llm_openai_model,
-                http_client=llm_http_client,
+                client=llm_client,
             ),
             fallback=heuristic_planner if settings.llm_fallback_provider == "heuristic" else None,
         )

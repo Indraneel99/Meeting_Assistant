@@ -1,10 +1,39 @@
-import json
-
-import httpx
+from dataclasses import dataclass, field
 
 from meeting_assistant.schemas.planner import PlanResult
 from meeting_assistant.services.context import ContextBundle
 from meeting_assistant.services.planner import HeuristicPlanner, OpenAIPlanner, PlannerRouter, PlannerRuntimeState
+
+
+@dataclass
+class FakeParsedResponse:
+    output_parsed: PlanResult | None
+
+
+@dataclass
+class FakeResponsesClient:
+    response: FakeParsedResponse | None = None
+    error: Exception | None = None
+    calls: list[dict[str, object]] = field(default_factory=list)
+
+    def parse(
+        self,
+        *,
+        model: str,
+        input: list[dict[str, str]],
+        text_format: type[PlanResult],
+    ) -> FakeParsedResponse:
+        self.calls.append({"model": model, "input": input, "text_format": text_format})
+        if self.error:
+            raise self.error
+        if self.response is None:
+            raise ValueError("Missing fake response.")
+        return self.response
+
+
+@dataclass
+class FakeOpenAIClient:
+    responses: FakeResponsesClient
 
 
 def test_heuristic_planner_extracts_basic_structure() -> None:
@@ -31,28 +60,11 @@ def test_openai_planner_parses_structured_output() -> None:
         tool_calls=[{"tool_name": "email.send", "payload": {"subject": "Recap", "body": "Send recap"}}],
     )
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content.decode())
-        assert payload["model"] == "gpt-5.4-mini"
-        assert payload["response_format"]["type"] == "json_schema"
-        return httpx.Response(
-            200,
-            json={
-                "choices": [
-                    {
-                        "message": {
-                            "content": structured_plan.model_dump_json(),
-                        }
-                    }
-                ]
-            },
-        )
+    responses = FakeResponsesClient(response=FakeParsedResponse(output_parsed=structured_plan))
 
     planner = OpenAIPlanner(
-        api_key="test-key",
-        base_url="https://api.openai.com/v1",
         model_name="gpt-5.4-mini",
-        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        client=FakeOpenAIClient(responses=responses),
     )
 
     result = planner.plan(
@@ -63,18 +75,15 @@ def test_openai_planner_parses_structured_output() -> None:
     )
 
     assert result == structured_plan
+    assert responses.calls[0]["model"] == "gpt-5.4-mini"
+    assert responses.calls[0]["text_format"] is PlanResult
 
 
 def test_planner_router_falls_back_when_primary_fails() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, json={"error": {"message": "boom"}})
-
     router = PlannerRouter(
         primary=OpenAIPlanner(
-            api_key="test-key",
-            base_url="https://api.openai.com/v1",
             model_name="gpt-5.4-mini",
-            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+            client=FakeOpenAIClient(responses=FakeResponsesClient(error=RuntimeError("boom"))),
         ),
         fallback=HeuristicPlanner(),
     )

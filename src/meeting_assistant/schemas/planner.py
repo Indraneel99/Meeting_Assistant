@@ -1,11 +1,43 @@
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, TypedDict
+
+from pydantic import BaseModel, ConfigDict, model_validator
+
+
+class ToolPayload(TypedDict):
+    subject: str
+    body: str
+    title: str
+    details: str
+    target: str
+    simulate_retryable_failure: str
 
 
 class ToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool_name: str
-    payload: dict[str, str]
+    payload: ToolPayload
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_payload_keys(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        payload = data.get("payload")
+        if not isinstance(payload, dict):
+            return data
+
+        normalized_payload = {
+            "subject": "",
+            "body": "",
+            "title": "",
+            "details": "",
+            "target": "",
+            "simulate_retryable_failure": "",
+            **payload,
+        }
+        return {**data, "payload": normalized_payload}
 
 
 class PlannedTask(BaseModel):
@@ -26,6 +58,6 @@ class PlanResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str
-    tasks: list[PlannedTask] = Field(default_factory=list)
-    decisions: list[PlannedDecision] = Field(default_factory=list)
-    tool_calls: list[ToolCall] = Field(default_factory=list)
+    tasks: list[PlannedTask]
+    decisions: list[PlannedDecision]
+    tool_calls: list[ToolCall]

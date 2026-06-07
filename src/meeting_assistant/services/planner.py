@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
+from openai import APIStatusError
 
 from meeting_assistant.schemas.planner import PlanResult, PlannedDecision, PlannedTask, ToolCall
 from meeting_assistant.services.context import ContextBundle
@@ -38,6 +38,25 @@ class Planner(Protocol):
         runtime_state: PlannerRuntimeState | None = None,
     ) -> PlanResult:
         ...
+
+
+class OpenAIParsedResponse(Protocol):
+    output_parsed: PlanResult | None
+
+
+class OpenAIResponsesClient(Protocol):
+    def parse(
+        self,
+        *,
+        model: str,
+        input: list[dict[str, str]],
+        text_format: type[PlanResult],
+    ) -> OpenAIParsedResponse:
+        ...
+
+
+class OpenAIClient(Protocol):
+    responses: OpenAIResponsesClient
 
 
 class HeuristicPlanner:
@@ -133,6 +152,8 @@ def build_planner_messages(
         "- Do not repeat a tool call that already succeeded or is awaiting approval in the execution history.\n"
         "- If previous tool results already satisfy the request, return no tool calls.\n"
         "- Use tool names email.send and calendar.create_event.\n"
+        "- Tool payloads must include subject, body, title, details, target, and simulate_retryable_failure. "
+        "Use empty strings for irrelevant payload fields.\n"
     )
     return [
         {"role": "system", "content": system_prompt},
@@ -142,10 +163,8 @@ def build_planner_messages(
 
 @dataclass(slots=True)
 class OpenAIPlanner:
-    api_key: str
-    base_url: str
     model_name: str
-    http_client: httpx.Client
+    client: OpenAIClient
 
     def plan(
         self,
@@ -154,38 +173,19 @@ class OpenAIPlanner:
         context: ContextBundle,
         runtime_state: PlannerRuntimeState | None = None,
     ) -> PlanResult:
-        schema = PlanResult.model_json_schema()
         logger.info(
-            "Planner provider=openai api=responses model=%s iteration=%s",
+            "Planner provider=openai sdk=responses.parse model=%s iteration=%s",
             self.model_name,
             runtime_state.iteration if runtime_state else 1,
         )
-        response = self.http_client.post(
-            f"{self.base_url.rstrip('/')}/responses",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.model_name,
-                "input": build_planner_messages(title, transcript_text, context, runtime_state),
-                "text_format": PlanResult,
-            },
+        response = self.client.responses.parse(
+            model=self.model_name,
+            input=build_planner_messages(title, transcript_text, context, runtime_state),
+            text_format=PlanResult,
         )
-        response.raise_for_status()
-        payload = response.json()
-
-        text_parts: list[str] = []
-        for output_item in payload.get("output", []):
-            if output_item.get("type") != "message":
-                continue
-            for content_item in output_item.get("content", []):
-                if content_item.get("type") == "output_text":
-                    text_parts.append(content_item.get("text", ""))
-
-        content_text = "".join(text_parts).strip()
-
-        return PlanResult.model_validate(json.loads(content_text))
+        if response.output_parsed is None:
+            raise ValueError("OpenAI planner returned no parsed output.")
+        return response.output_parsed
 
 
 @dataclass(slots=True)
@@ -205,7 +205,13 @@ class PlannerRouter:
         except Exception as exc:
             if self.fallback is None:
                 raise
-            if isinstance(exc, httpx.HTTPStatusError):
+            if isinstance(exc, APIStatusError):
+                logger.error(
+                    "Primary planner OpenAI API error status=%s body=%s",
+                    exc.status_code,
+                    exc.response.text,
+                )
+            elif isinstance(exc, httpx.HTTPStatusError):
                 status_code = exc.response.status_code
                 response_body = exc.response.text
                 logger.error(
