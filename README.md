@@ -31,6 +31,21 @@ uv sync
 uv run uvicorn meeting_assistant.main:app --reload
 ```
 
+The app applies Alembic migrations on startup. SQLite remains the default for local development:
+
+```bash
+export MEETING_ASSISTANT_DATABASE_URL="sqlite:///./meeting_assistant.db"
+```
+
+For Postgres, install/create the database externally and point the app at it:
+
+```bash
+export MEETING_ASSISTANT_DATABASE_URL="postgresql+psycopg://user:password@localhost:5432/meeting_assistant"
+export MEETING_ASSISTANT_DATABASE_POOL_SIZE="5"
+export MEETING_ASSISTANT_DATABASE_MAX_OVERFLOW="10"
+uv run alembic upgrade head
+```
+
 To enable hosted batch ASR for `source_uri` inputs, set:
 
 ```bash

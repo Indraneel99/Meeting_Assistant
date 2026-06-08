@@ -1,28 +1,73 @@
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from meeting_assistant.core.config import Settings
-from meeting_assistant.db.models import Base
 
 settings = Settings()
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations"
+
+
+def _engine_options(database_url: str) -> dict[str, object]:
+    if database_url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+
+    return {
+        "pool_size": settings.database_pool_size,
+        "max_overflow": settings.database_max_overflow,
+        "pool_pre_ping": True,
+    }
+
+
+engine = create_engine(settings.database_url, **_engine_options(settings.database_url))
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
-def initialize_database() -> None:
-    Base.metadata.create_all(bind=engine)
-    _apply_sqlite_compat_migrations()
+def initialize_database(database_url: str | None = None) -> None:
+    target_url = database_url or settings.database_url
+    target_engine = engine if target_url == settings.database_url else create_engine(target_url, **_engine_options(target_url))
 
-
-def _apply_sqlite_compat_migrations() -> None:
-    if not settings.database_url.startswith("sqlite"):
+    if _has_application_tables_without_alembic_version(target_engine):
+        _apply_sqlite_compat_migrations(target_engine, target_url)
+        _stamp_database(target_url)
         return
 
-    inspector = inspect(engine)
+    _upgrade_database(target_url)
+
+
+def _alembic_config(database_url: str) -> Config:
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS_DIR))
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    config.attributes["database_url"] = database_url
+    return config
+
+
+def _upgrade_database(database_url: str) -> None:
+    command.upgrade(_alembic_config(database_url), "head")
+
+
+def _stamp_database(database_url: str) -> None:
+    command.stamp(_alembic_config(database_url), "head")
+
+
+def _has_application_tables_without_alembic_version(target_engine) -> bool:
+    inspector = inspect(target_engine)
+    table_names = set(inspector.get_table_names())
+    return "users" in table_names and "alembic_version" not in table_names
+
+
+def _apply_sqlite_compat_migrations(target_engine, database_url: str) -> None:
+    if not database_url.startswith("sqlite"):
+        return
+
+    inspector = inspect(target_engine)
     workflow_columns = {column["name"] for column in inspector.get_columns("workflow_runs")}
-    with engine.begin() as connection:
+    with target_engine.begin() as connection:
         if "iteration_count" not in workflow_columns:
             connection.execute(
                 text("ALTER TABLE workflow_runs ADD COLUMN iteration_count INTEGER DEFAULT 0 NOT NULL")
