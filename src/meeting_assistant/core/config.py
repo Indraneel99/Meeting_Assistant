@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./meeting_assistant.db"
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
     chunk_size_words: int = 120
     recent_summary_limit: int = 3
     semantic_context_limit: int = 5
