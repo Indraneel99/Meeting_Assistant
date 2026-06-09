@@ -109,6 +109,55 @@ def test_agent_runtime_pauses_on_approval() -> None:
     assert result.tool_executions[0]["status"] == "approval_required"
 
 
+def test_agent_runtime_resume_after_approval() -> None:
+    repository = build_repository()
+    runtime = AgentRuntime(
+        repository=repository,
+        planner=StubPlanner(
+            plans=[
+                PlanResult(
+                    summary="Need calendar booking.",
+                    tasks=[],
+                    decisions=[],
+                    tool_calls=[{"tool_name": "calendar.create_event", "payload": {"title": "Sync", "details": "Book"}}],
+                ),
+                PlanResult(
+                    summary="Calendar handled.",
+                    tasks=[],
+                    decisions=[],
+                    tool_calls=[],
+                ),
+            ]
+        ),
+        tool_validator=ToolValidator(),
+        tool_executor=ToolExecutor(repository, sleep_fn=lambda _: None),
+        max_iterations=4,
+    )
+    workflow_run_id = build_workflow_run(repository)
+
+    paused = runtime.run(
+        workflow_run_id=workflow_run_id,
+        title="Weekly sync",
+        transcript_text="Schedule the next meeting.",
+        context=ContextBundle(recent_summaries=[], relevant_summaries=[]),
+    )
+    assert paused.status == "awaiting_approval"
+
+    approval = repository.list_approval_requests(workflow_run_id)[0]
+    ToolExecutor(repository, sleep_fn=lambda _: None).finalize_approval(approval.tool_execution_id, approved=True)
+    repository.update_agent_step_for_tool(workflow_run_id, approval.tool_name, "executed")
+
+    resumed = runtime.resume(
+        workflow_run_id=workflow_run_id,
+        title="Weekly sync",
+        transcript_text="Schedule the next meeting.",
+        context=ContextBundle(recent_summaries=[], relevant_summaries=[]),
+    )
+
+    assert resumed.status == "done"
+    assert any(item["status"] == "executed" for item in resumed.tool_executions)
+
+
 def test_agent_runtime_loop_guard_stops_repeated_calls() -> None:
     repository = build_repository()
     repeated_plan = PlanResult(

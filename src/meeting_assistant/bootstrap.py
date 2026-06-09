@@ -5,6 +5,7 @@ from meeting_assistant.core.config import Settings
 from meeting_assistant.db.session import SessionLocal, initialize_database
 from meeting_assistant.repositories import Repository
 from meeting_assistant.services.agent import AgentRuntime
+from meeting_assistant.services.approvals import ApprovalService
 from meeting_assistant.services.asr import build_asr
 from meeting_assistant.services.audio_storage import build_audio_upload_store
 from meeting_assistant.services.context import ContextLoader
@@ -79,6 +80,13 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         job_queue.bind(orchestrator.run_batch_workflow)
 
     query_service = QueryService(repository, embedding_index)
+    approval_service = ApprovalService(
+        repository=repository,
+        tool_executor=tool_executor,
+        agent_runtime=agent_runtime,
+        context_loader=context_loader,
+        embedding_index=embedding_index,
+    )
 
     return Container(
         settings=settings,
@@ -87,4 +95,5 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         orchestrator=orchestrator,
         query_service=query_service,
         audio_upload_store=audio_upload_store,
+        approval_service=approval_service,
     )
