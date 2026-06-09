@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     asr_openai_language: str | None = None
     asr_openai_timeout_seconds: float = 120.0
     asr_openai_chunking_strategy: str = "auto"
+    asr_upload_backend: str = "local"
+    asr_upload_dir: str = "./uploads/audio"
+    asr_max_upload_bytes: int = 100 * 1024 * 1024
+    asr_s3_bucket: str | None = None
+    asr_s3_region: str | None = None
+    asr_s3_upload_prefix: str = "audio/"
+    asr_gcs_bucket: str | None = None
     batch_processing_mode: str = "sync"
     queue_provider: str = "memory"
     job_queue_provider: str = "inprocess"

@@ -77,7 +77,31 @@ To enable hosted batch ASR for `source_uri` inputs, set:
 
 ```bash
 export MEETING_ASSISTANT_ASR_OPENAI_API_KEY="..."
+export MEETING_ASSISTANT_ASR_PROVIDER="openai"
 ```
+
+Upload audio directly via multipart form:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/meetings/batch/upload \
+  -F user_external_id=alice \
+  -F user_email=alice@example.com \
+  -F title="Weekly sync" \
+  -F audio=@meeting.wav
+```
+
+Audio uploads are stored locally by default (`./uploads/audio`) and referenced as `file://` URIs for ASR. For S3-backed uploads:
+
+```bash
+export MEETING_ASSISTANT_ASR_UPLOAD_BACKEND="s3"
+export MEETING_ASSISTANT_ASR_S3_BUCKET="my-bucket"
+export MEETING_ASSISTANT_ASR_S3_REGION="us-east-1"
+```
+
+ASR can also read audio from object storage URIs:
+
+- `s3://bucket/path/to/meeting.wav` (requires AWS credentials via standard boto3 env/instance profile)
+- `gs://bucket/path/to/meeting.wav` (requires `google-cloud-storage` and GCP credentials)
 
 Optional:
 
