@@ -35,6 +35,12 @@ class ToolExecutionStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class ApprovalRequestStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -127,6 +133,7 @@ class WorkflowRun(Base):
     meeting: Mapped["Meeting"] = relationship(back_populates="workflow_runs")
     tool_executions: Mapped[list["ToolExecution"]] = relationship(back_populates="workflow_run")
     agent_steps: Mapped[list["AgentStep"]] = relationship(back_populates="workflow_run")
+    approval_requests: Mapped[list["ApprovalRequest"]] = relationship(back_populates="workflow_run")
 
 
 class TaskItem(Base):
@@ -169,6 +176,7 @@ class ToolExecution(Base):
 
     workflow_run: Mapped["WorkflowRun"] = relationship(back_populates="tool_executions")
     attempts: Mapped[list["ToolExecutionAttempt"]] = relationship(back_populates="tool_execution")
+    approval_request: Mapped["ApprovalRequest | None"] = relationship(back_populates="tool_execution")
 
 
 class ToolExecutionAttempt(Base):
@@ -183,6 +191,27 @@ class ToolExecutionAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     tool_execution: Mapped["ToolExecution"] = relationship(back_populates="attempts")
+
+
+class ApprovalRequest(Base):
+    __tablename__ = "approval_requests"
+    __table_args__ = (UniqueConstraint("tool_execution_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workflow_run_id: Mapped[int] = mapped_column(ForeignKey("workflow_runs.id"), index=True)
+    tool_execution_id: Mapped[int] = mapped_column(ForeignKey("tool_executions.id"), index=True)
+    tool_name: Mapped[str] = mapped_column(String(255))
+    payload: Mapped[str] = mapped_column(Text)
+    status: Mapped[ApprovalRequestStatus] = mapped_column(
+        SqlEnum(ApprovalRequestStatus),
+        default=ApprovalRequestStatus.PENDING,
+    )
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    workflow_run: Mapped["WorkflowRun"] = relationship(back_populates="approval_requests")
+    tool_execution: Mapped["ToolExecution"] = relationship(back_populates="approval_request")
 
 
 class AgentStep(Base):

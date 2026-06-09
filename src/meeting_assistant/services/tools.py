@@ -57,6 +57,16 @@ class CalendarToolProvider:
             ).hexdigest()[:12],
         }
 
+    def execute_after_approval(self, payload: dict[str, str]) -> dict[str, object]:
+        event_key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
+        return {
+            "provider": "google-calendar",
+            "event_id": f"evt_{event_key}",
+            "status": "created",
+            "title": payload.get("title", ""),
+            "message": "Calendar event created after approval.",
+        }
+
 
 class WebhookToolProvider:
     def execute(self, payload: dict[str, str]) -> dict[str, object]:
@@ -166,6 +176,12 @@ class ToolExecutor:
                         status=ToolExecutionStatus.APPROVAL_REQUIRED,
                         result=json.dumps(result),
                     )
+                    self.repository.create_approval_request(
+                        workflow_run_id=workflow_run_id,
+                        tool_execution_id=execution.id,
+                        tool_name=tool_call.tool_name,
+                        payload=payload_blob,
+                    )
                     return ToolExecutionOutcome(
                         status=ToolExecutionStatus.APPROVAL_REQUIRED.value,
                         result=result,
@@ -220,6 +236,64 @@ class ToolExecutor:
             result=failure_result,
             attempts=self.max_retries,
             idempotency_key=idempotency_key,
+        )
+
+    def finalize_approval(self, execution_id: int, *, approved: bool) -> ToolExecutionOutcome:
+        execution = self.repository.get_tool_execution_by_id(execution_id)
+        if execution is None:
+            raise ValueError(f"Tool execution {execution_id} not found")
+        if execution.status != ToolExecutionStatus.APPROVAL_REQUIRED:
+            raise ValueError(f"Tool execution {execution_id} is not awaiting approval.")
+
+        payload = json.loads(execution.payload)
+        attempt_number = self._attempt_count(execution.id) + 1
+
+        if approved:
+            provider = self.providers.get(execution.tool_name)
+            if provider is None:
+                raise ValueError(f"Unsupported tool: {execution.tool_name}")
+            if hasattr(provider, "execute_after_approval"):
+                provider_result = provider.execute_after_approval(payload)
+            else:
+                provider_result = provider.execute(payload)
+            result = {"message": f"Approved and executed {execution.tool_name}", **provider_result}
+            self.repository.create_tool_execution_attempt(
+                execution.id,
+                attempt_number,
+                ToolExecutionStatus.EXECUTED.value,
+                json.dumps(result),
+                None,
+            )
+            self.repository.update_tool_execution(
+                execution.id,
+                status=ToolExecutionStatus.EXECUTED,
+                result=json.dumps(result),
+            )
+            return ToolExecutionOutcome(
+                status=ToolExecutionStatus.EXECUTED.value,
+                result=result,
+                attempts=attempt_number,
+                idempotency_key=execution.idempotency_key,
+            )
+
+        result = {"message": f"Rejected {execution.tool_name}", "skipped": True}
+        self.repository.create_tool_execution_attempt(
+            execution.id,
+            attempt_number,
+            ToolExecutionStatus.SKIPPED.value,
+            json.dumps(result),
+            None,
+        )
+        self.repository.update_tool_execution(
+            execution.id,
+            status=ToolExecutionStatus.SKIPPED,
+            result=json.dumps(result),
+        )
+        return ToolExecutionOutcome(
+            status=ToolExecutionStatus.SKIPPED.value,
+            result=result,
+            attempts=attempt_number,
+            idempotency_key=execution.idempotency_key,
         )
 
     def _attempt_count(self, execution_id: int) -> int:

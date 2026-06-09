@@ -33,8 +33,7 @@ def initialize_database(database_url: str | None = None) -> None:
 
     if _has_application_tables_without_alembic_version(target_engine):
         _apply_sqlite_compat_migrations(target_engine, target_url)
-        _stamp_database(target_url)
-        return
+        _stamp_database(target_url, revision="0001_initial_schema")
 
     _upgrade_database(target_url)
 
@@ -51,8 +50,8 @@ def _upgrade_database(database_url: str) -> None:
     command.upgrade(_alembic_config(database_url), "head")
 
 
-def _stamp_database(database_url: str) -> None:
-    command.stamp(_alembic_config(database_url), "head")
+def _stamp_database(database_url: str, revision: str = "head") -> None:
+    command.stamp(_alembic_config(database_url), revision)
 
 
 def _has_application_tables_without_alembic_version(target_engine) -> bool:
@@ -66,9 +65,11 @@ def _apply_sqlite_compat_migrations(target_engine, database_url: str) -> None:
         return
 
     inspector = inspect(target_engine)
-    workflow_columns = {column["name"] for column in inspector.get_columns("workflow_runs")}
+    table_names = set(inspector.get_table_names())
     with target_engine.begin() as connection:
-        if "iteration_count" not in workflow_columns:
-            connection.execute(
-                text("ALTER TABLE workflow_runs ADD COLUMN iteration_count INTEGER DEFAULT 0 NOT NULL")
-            )
+        if "workflow_runs" in table_names:
+            workflow_columns = {column["name"] for column in inspector.get_columns("workflow_runs")}
+            if "iteration_count" not in workflow_columns:
+                connection.execute(
+                    text("ALTER TABLE workflow_runs ADD COLUMN iteration_count INTEGER DEFAULT 0 NOT NULL")
+                )

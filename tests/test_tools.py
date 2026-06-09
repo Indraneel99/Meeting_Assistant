@@ -15,10 +15,13 @@ def build_repository() -> Repository:
 
 def test_calendar_tool_requires_approval() -> None:
     repository = build_repository()
+    user = repository.get_or_create_user("tool-user", "tool-user@example.com")
+    meeting = repository.create_meeting(user.id, "Sync", None, "Transcript")
+    workflow_run = repository.create_workflow_run(meeting.id)
     executor = ToolExecutor(repository, sleep_fn=lambda _: None)
 
     execution = executor.execute(
-        workflow_run_id=1,
+        workflow_run_id=workflow_run.id,
         tool_call=ToolCall(tool_name="calendar.create_event", payload={"title": "Sync", "details": "Book it"}),
     )
 
@@ -26,13 +29,20 @@ def test_calendar_tool_requires_approval() -> None:
     assert execution.attempts == 1
     assert execution.result["approval_required"] is True
 
+    approvals = repository.list_approval_requests(workflow_run.id)
+    assert len(approvals) == 1
+    assert approvals[0].tool_name == "calendar.create_event"
+
 
 def test_retryable_failure_moves_to_dlq_style_failure() -> None:
     repository = build_repository()
+    user = repository.get_or_create_user("tool-user", "tool-user@example.com")
+    meeting = repository.create_meeting(user.id, "Sync", None, "Transcript")
+    workflow_run = repository.create_workflow_run(meeting.id)
     executor = ToolExecutor(repository, max_retries=3, backoff_seconds=0, sleep_fn=lambda _: None)
 
     execution = executor.execute(
-        workflow_run_id=1,
+        workflow_run_id=workflow_run.id,
         tool_call=ToolCall(
             tool_name="email.send",
             payload={
@@ -50,11 +60,14 @@ def test_retryable_failure_moves_to_dlq_style_failure() -> None:
 
 def test_duplicate_execution_reuses_existing_terminal_result() -> None:
     repository = build_repository()
+    user = repository.get_or_create_user("tool-user", "tool-user@example.com")
+    meeting = repository.create_meeting(user.id, "Sync", None, "Transcript")
+    workflow_run = repository.create_workflow_run(meeting.id)
     executor = ToolExecutor(repository, sleep_fn=lambda _: None)
     tool_call = ToolCall(tool_name="email.send", payload={"subject": "Follow-up", "body": "Please send this"})
 
-    first = executor.execute(workflow_run_id=1, tool_call=tool_call)
-    second = executor.execute(workflow_run_id=1, tool_call=tool_call)
+    first = executor.execute(workflow_run_id=workflow_run.id, tool_call=tool_call)
+    second = executor.execute(workflow_run_id=workflow_run.id, tool_call=tool_call)
 
     assert first.status == "executed"
     assert second.status == "executed"

@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from meeting_assistant.db.models import (
     AgentStep,
+    ApprovalRequest,
+    ApprovalRequestStatus,
     Decision,
     Meeting,
     MeetingChunk,
@@ -318,6 +321,84 @@ class Repository:
                 ToolExecutionAttempt.tool_execution_id == tool_execution_id
             )
             return int(session.scalar(statement) or 0)
+
+    def get_tool_execution_by_id(self, execution_id: int) -> ToolExecution | None:
+        with self.session_factory() as session:
+            return session.get(ToolExecution, execution_id)
+
+    def create_approval_request(
+        self,
+        workflow_run_id: int,
+        tool_execution_id: int,
+        tool_name: str,
+        payload: str,
+    ) -> ApprovalRequest:
+        with self.session_factory() as session:
+            existing = session.scalar(
+                select(ApprovalRequest).where(ApprovalRequest.tool_execution_id == tool_execution_id)
+            )
+            if existing is not None:
+                return existing
+
+            request = ApprovalRequest(
+                workflow_run_id=workflow_run_id,
+                tool_execution_id=tool_execution_id,
+                tool_name=tool_name,
+                payload=payload,
+                status=ApprovalRequestStatus.PENDING,
+            )
+            session.add(request)
+            session.commit()
+            session.refresh(request)
+            return request
+
+    def get_approval_request(self, approval_request_id: int) -> ApprovalRequest | None:
+        with self.session_factory() as session:
+            return session.get(ApprovalRequest, approval_request_id)
+
+    def list_approval_requests(self, workflow_run_id: int) -> list[ApprovalRequest]:
+        with self.session_factory() as session:
+            statement = (
+                select(ApprovalRequest)
+                .where(ApprovalRequest.workflow_run_id == workflow_run_id)
+                .order_by(ApprovalRequest.id.asc())
+            )
+            return list(session.scalars(statement))
+
+    def resolve_approval_request(
+        self,
+        approval_request_id: int,
+        *,
+        status: ApprovalRequestStatus,
+        resolved_by: str | None = None,
+    ) -> ApprovalRequest:
+        with self.session_factory() as session:
+            request = session.get(ApprovalRequest, approval_request_id)
+            if request is None:
+                raise ValueError(f"Approval request {approval_request_id} not found")
+            request.status = status
+            request.resolved_by = resolved_by
+            request.resolved_at = datetime.now(UTC)
+            session.commit()
+            session.refresh(request)
+            return request
+
+    def update_agent_step_for_tool(self, workflow_run_id: int, tool_name: str, status: str) -> None:
+        with self.session_factory() as session:
+            statement = (
+                select(AgentStep)
+                .where(
+                    AgentStep.workflow_run_id == workflow_run_id,
+                    AgentStep.step_kind == "tool",
+                )
+                .order_by(AgentStep.id.desc())
+            )
+            for step in session.scalars(statement):
+                payload = json.loads(step.payload_json)
+                if payload.get("tool_name") == tool_name and step.status == "approval_required":
+                    step.status = status
+                    session.commit()
+                    return
 
     def list_recent_meetings(self, user_id: int, limit: int) -> list[Meeting]:
         with self.session_factory() as session:

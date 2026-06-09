@@ -73,6 +73,24 @@ uv run arq meeting_assistant.worker.WorkerSettings
 
 Poll workflow status with `GET /api/v1/workflows/{workflow_run_id}`.
 
+Approval requests for gated calendar actions can be listed and resolved:
+
+```bash
+# List pending approvals for a workflow
+curl http://127.0.0.1:8000/api/v1/workflows/{workflow_run_id}/approvals
+
+# Approve or reject
+curl -X POST http://127.0.0.1:8000/api/v1/approvals/{approval_request_id}/approve \
+  -H "Content-Type: application/json" \
+  -d '{"resolved_by": "alice"}'
+
+curl -X POST http://127.0.0.1:8000/api/v1/approvals/{approval_request_id}/reject \
+  -H "Content-Type: application/json" \
+  -d '{"resolved_by": "alice"}'
+```
+
+A minimal admin UI is available at `GET /admin/approvals/{approval_request_id}`.
+
 To enable hosted batch ASR for `source_uri` inputs, set:
 
 ```bash

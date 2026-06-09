@@ -66,6 +66,8 @@ class BatchOrchestrator:
                 workflow_run = self.repository.get_workflow_run(workflow_run_id)
                 if workflow_run is None:
                     raise ValueError(f"Workflow run {workflow_run_id} not found")
+                if workflow_run.status != WorkflowStatus.PENDING:
+                    return self._result_from_existing_workflow(workflow_run)
                 meeting = self.repository.get_meeting(workflow_run.meeting_id)
                 if meeting is None:
                     raise ValueError(f"Meeting {workflow_run.meeting_id} not found")
@@ -136,6 +138,30 @@ class BatchOrchestrator:
 
     def _transcribe(self, payload: BatchMeetingRequest) -> TranscriptDocument:
         return self.asr.transcribe(payload.source_uri, payload.transcript_text)
+
+    def _result_from_existing_workflow(self, workflow_run) -> dict[str, object]:
+        status = self.get_workflow_status(workflow_run.id)
+        tool_executions = [
+            {
+                "tool_name": item.tool_name,
+                "status": item.status,
+                "attempts": item.attempts,
+                "idempotency_key": item.idempotency_key,
+                "result": item.result,
+            }
+            for item in status.tool_executions
+        ]
+        return {
+            "meeting_id": status.meeting_id,
+            "workflow_run_id": status.workflow_run_id,
+            "status": status.status,
+            "summary": status.summary or "",
+            "tasks_created": status.tasks_created or 0,
+            "decisions_logged": status.decisions_logged or 0,
+            "tool_calls_recorded": status.tool_calls_recorded or 0,
+            "iterations_used": status.iteration_count,
+            "tool_executions": tool_executions,
+        }
 
     def get_workflow_status(self, workflow_run_id: int) -> WorkflowStatusResponse:
         workflow_run = self.repository.get_workflow_run(workflow_run_id)

@@ -87,9 +87,19 @@ def test_workflow_status_not_found() -> None:
 
 def test_run_batch_workflow_uses_existing_workflow_record() -> None:
     from meeting_assistant.bootstrap import bootstrap_container
+    from meeting_assistant.services.jobs import BatchJobQueue
+
+    class CaptureOnlyQueue:
+        def __init__(self) -> None:
+            self.jobs: list[tuple[int, dict[str, object]]] = []
+
+        def enqueue_batch(self, workflow_run_id: int, payload: dict[str, object]) -> None:
+            self.jobs.append((workflow_run_id, payload))
 
     settings = build_async_settings()
     container = bootstrap_container(settings)
+    capture_queue = CaptureOnlyQueue()
+    container.orchestrator.job_queue = capture_queue
     payload = BatchMeetingRequest(
         user_external_id=f"user-{uuid4()}",
         user_email=f"{uuid4()}@example.com",
@@ -97,7 +107,7 @@ def test_run_batch_workflow_uses_existing_workflow_record() -> None:
         transcript_text="Decision: keep the worker path simple. Action: send recap.",
     )
     accepted = container.orchestrator.submit_batch_meeting(payload)
-    assert isinstance(container.orchestrator.job_queue, InProcessBatchJobQueue)
+    assert len(capture_queue.jobs) == 1
 
     result = container.orchestrator.run_batch_workflow(
         workflow_run_id=accepted["workflow_run_id"],
