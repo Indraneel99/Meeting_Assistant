@@ -82,7 +82,8 @@ class BatchOrchestrator:
             self.repository.save_transcript_artifact(meeting.id, transcript)
             normalized = self.normalizer.normalize(transcript_text)
             chunks = self.normalizer.chunk(normalized)
-            self.repository.replace_chunks(meeting.id, chunks)
+            chunk_records = [(text, self.embedding_index.embed(text)) for text in chunks]
+            self.repository.replace_chunks(meeting.id, chunk_records)
             self.queue.publish(meeting.id, chunks)
             self.repository.update_workflow_status(workflow_run.id, WorkflowStatus.VALIDATED)
 
@@ -103,7 +104,16 @@ class BatchOrchestrator:
                 summary_text=agent_result.summary,
                 summary_embedding=embedding,
                 tasks=[task.model_dump() for task in agent_result.tasks],
-                decisions=[decision.model_dump() for decision in agent_result.decisions],
+                decisions=[
+                    {
+                        "topic": decision.topic,
+                        "decision_text": decision.decision_text,
+                        "topic_embedding": self.embedding_index.embed(
+                            f"{decision.topic}: {decision.decision_text}"
+                        ),
+                    }
+                    for decision in agent_result.decisions
+                ],
             )
             self.repository.update_workflow_status(workflow_run.id, WorkflowStatus(agent_result.status))
         except ASRError as exc:

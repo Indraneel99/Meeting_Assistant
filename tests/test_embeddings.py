@@ -73,11 +73,18 @@ def test_inmemory_search_uses_persisted_embedding() -> None:
     )
 
     index = InMemoryEmbeddingIndex(embedder=FixedEmbedder([1.0, 0.0]))
-    results = index.search_for_user(repository, user.id, "completely unrelated query", limit=5)
+    results, next_cursor, has_more = index.search_for_user(
+        repository,
+        user.id,
+        "completely unrelated query",
+        limit=5,
+    )
 
     assert len(results) == 1
     assert results[0]["meeting_id"] == meeting.id
     assert results[0]["score"] == 1.0
+    assert next_cursor is None
+    assert has_more is False
 
 
 def test_heuristic_embedder_and_padding() -> None:

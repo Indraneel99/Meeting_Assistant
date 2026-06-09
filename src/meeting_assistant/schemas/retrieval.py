@@ -8,8 +8,25 @@ class MeetingSearchResult(BaseModel):
     score: float
 
 
-class SearchMeetingsResponse(BaseModel):
+class PaginatedSearchMeetingsResponse(BaseModel):
     results: list[MeetingSearchResult]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class ChunkSearchResult(BaseModel):
+    chunk_id: int
+    meeting_id: int
+    meeting_title: str
+    chunk_index: int
+    text: str
+    score: float
+
+
+class PaginatedChunkSearchResponse(BaseModel):
+    results: list[ChunkSearchResult]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class MeetingTask(BaseModel):
@@ -24,13 +41,24 @@ class MeetingTasksResponse(BaseModel):
 
 
 class DecisionItem(BaseModel):
+    decision_id: int
     meeting_id: int
     topic: str
     decision_text: str
+    score: float
 
 
-class DecisionsResponse(BaseModel):
+class PaginatedDecisionsResponse(BaseModel):
     results: list[DecisionItem]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class QueryCitation(BaseModel):
+    meeting_id: int
+    meeting_title: str
+    source_type: str
+    excerpt: str
 
 
 class QueryRequest(BaseModel):
@@ -40,6 +68,8 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
+    citations: list[QueryCitation]
     meetings: list[MeetingSearchResult]
+    chunks: list[ChunkSearchResult]
     tasks: list[MeetingTask]
     decisions: list[DecisionItem]

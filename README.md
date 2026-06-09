@@ -169,6 +169,16 @@ export MEETING_ASSISTANT_JIRA_API_TOKEN="..."
 export MEETING_ASSISTANT_JIRA_PROJECT_KEY="ENG"
 ```
 
+Retrieval uses semantic search across meeting summaries, transcript chunks, and decisions. `/query` synthesizes answers with citations from retrieved context. Enable hosted Q&A with:
+
+```bash
+export MEETING_ASSISTANT_QUERY_PROVIDER="openai"
+export MEETING_ASSISTANT_LLM_OPENAI_API_KEY="..."
+export MEETING_ASSISTANT_QUERY_TOP_K_CHUNKS="5"
+```
+
+Chunk search is available at `GET /api/v1/meetings/chunks/search`. Search and decisions endpoints support cursor pagination via `cursor` and return `next_cursor` / `has_more`.
+
 Retry backoff can run off the request thread when using async workers:
 
 ```bash

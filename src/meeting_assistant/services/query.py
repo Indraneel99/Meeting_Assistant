@@ -1,30 +1,83 @@
+from meeting_assistant.core.config import Settings
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.retrieval import (
+    ChunkSearchResult,
     DecisionItem,
-    DecisionsResponse,
     MeetingSearchResult,
     MeetingTask,
     MeetingTasksResponse,
+    PaginatedChunkSearchResponse,
+    PaginatedDecisionsResponse,
+    PaginatedSearchMeetingsResponse,
     QueryRequest,
     QueryResponse,
-    SearchMeetingsResponse,
 )
 from meeting_assistant.services.embeddings import EmbeddingIndex
+from meeting_assistant.services.query_answerer import QueryAnswerer, RetrievalContext, build_query_answerer
 
 
 class QueryService:
-    def __init__(self, repository: Repository, embedding_index: EmbeddingIndex) -> None:
+    def __init__(
+        self,
+        repository: Repository,
+        embedding_index: EmbeddingIndex,
+        *,
+        answerer: QueryAnswerer | None = None,
+        settings: Settings | None = None,
+    ) -> None:
         self.repository = repository
         self.embedding_index = embedding_index
+        self.settings = settings or Settings()
+        self.answerer = answerer or build_query_answerer(self.settings)
 
-    def search_past_meetings(self, user_external_id: str, query: str, limit: int) -> SearchMeetingsResponse:
+    def search_past_meetings(
+        self,
+        user_external_id: str,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> PaginatedSearchMeetingsResponse:
         user = self.repository.get_user_by_external_id(user_external_id)
         if not user:
-            return SearchMeetingsResponse(results=[])
+            return PaginatedSearchMeetingsResponse(results=[])
 
-        results = self.embedding_index.search_for_user(self.repository, user.id, query, limit)
-        return SearchMeetingsResponse(
-            results=[MeetingSearchResult(**item) for item in results]
+        results, next_cursor, has_more = self.embedding_index.search_for_user(
+            self.repository,
+            user.id,
+            query,
+            limit,
+            cursor=cursor,
+        )
+        return PaginatedSearchMeetingsResponse(
+            results=[MeetingSearchResult(**item) for item in results],
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+
+    def search_chunks(
+        self,
+        user_external_id: str,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> PaginatedChunkSearchResponse:
+        user = self.repository.get_user_by_external_id(user_external_id)
+        if not user:
+            return PaginatedChunkSearchResponse(results=[])
+
+        results, next_cursor, has_more = self.embedding_index.search_chunks_for_user(
+            self.repository,
+            user.id,
+            query,
+            limit,
+            cursor=cursor,
+        )
+        return PaginatedChunkSearchResponse(
+            results=[ChunkSearchResult(**item) for item in results],
+            next_cursor=next_cursor,
+            has_more=has_more,
         )
 
     def get_meeting_tasks(self, meeting_id: int) -> MeetingTasksResponse:
@@ -34,32 +87,70 @@ class QueryService:
             tasks=[MeetingTask(assignee=task.assignee, action=task.action, status=task.status) for task in tasks],
         )
 
-    def get_decisions(self, user_external_id: str, topic: str, limit: int) -> DecisionsResponse:
+    def get_decisions(
+        self,
+        user_external_id: str,
+        topic: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> PaginatedDecisionsResponse:
         user = self.repository.get_user_by_external_id(user_external_id)
         if not user:
-            return DecisionsResponse(results=[])
+            return PaginatedDecisionsResponse(results=[])
 
-        topic_lower = topic.lower()
-        decisions = [
-            decision
-            for decision in self.repository.get_decisions_for_user(user.id)
-            if topic_lower in decision.topic.lower() or topic_lower in decision.decision_text.lower()
-        ]
-        return DecisionsResponse(
-            results=[
-                DecisionItem(meeting_id=decision.meeting_id, topic=decision.topic, decision_text=decision.decision_text)
-                for decision in decisions[:limit]
-            ]
+        results, next_cursor, has_more = self.embedding_index.search_decisions_for_user(
+            self.repository,
+            user.id,
+            topic,
+            limit,
+            cursor=cursor,
+        )
+        return PaginatedDecisionsResponse(
+            results=[DecisionItem(**item) for item in results],
+            next_cursor=next_cursor,
+            has_more=has_more,
         )
 
     def answer(self, payload: QueryRequest) -> QueryResponse:
-        meetings = self.search_past_meetings(payload.user_external_id, payload.question, 3).results
-        tasks = self.get_meeting_tasks(meetings[0].meeting_id).tasks if meetings else []
-        decisions = self.get_decisions(payload.user_external_id, payload.question, 3).results
+        meetings = self.search_past_meetings(
+            payload.user_external_id,
+            payload.question,
+            self.settings.query_top_k_meetings,
+        ).results
+        chunks = self.search_chunks(
+            payload.user_external_id,
+            payload.question,
+            self.settings.query_top_k_chunks,
+        ).results
+        decisions = self.get_decisions(
+            payload.user_external_id,
+            payload.question,
+            self.settings.query_top_k_decisions,
+        ).results
 
-        if meetings:
-            answer = f"Most relevant meeting: {meetings[0].title}. {meetings[0].summary}"
-        else:
-            answer = "No matching meeting history was found for that question yet."
+        meeting_ids = {meeting.meeting_id for meeting in meetings}
+        meeting_ids.update(chunk.meeting_id for chunk in chunks)
+        meeting_ids.update(decision.meeting_id for decision in decisions)
 
-        return QueryResponse(answer=answer, meetings=meetings, tasks=tasks, decisions=decisions)
+        tasks: list[MeetingTask] = []
+        for meeting_id in meeting_ids:
+            tasks.extend(self.get_meeting_tasks(meeting_id).tasks)
+
+        answer, citations = self.answerer.answer(
+            RetrievalContext(
+                question=payload.question,
+                meetings=meetings,
+                chunks=chunks,
+                decisions=decisions,
+            )
+        )
+
+        return QueryResponse(
+            answer=answer,
+            citations=citations,
+            meetings=meetings,
+            chunks=chunks,
+            tasks=tasks,
+            decisions=decisions,
+        )

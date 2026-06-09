@@ -15,6 +15,7 @@ from meeting_assistant.services.normalizer import TranscriptNormalizer
 from meeting_assistant.services.orchestrator import BatchOrchestrator
 from meeting_assistant.services.planner import HeuristicPlanner, OpenAIPlanner, PlannerRouter
 from meeting_assistant.services.query import QueryService
+from meeting_assistant.services.query_answerer import build_query_answerer
 from meeting_assistant.services.queue import build_transcript_queue
 from meeting_assistant.services.tools import ToolExecutor, ToolValidator, build_sleep_fn, build_tool_providers
 
@@ -35,6 +36,7 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
     audio_upload_store = build_audio_upload_store(settings)
     normalizer = TranscriptNormalizer(settings.chunk_size_words)
     heuristic_planner = HeuristicPlanner()
+    llm_client: OpenAI | None = None
     if settings.llm_provider == "openai" and settings.llm_openai_api_key:
         llm_client = OpenAI(
             api_key=settings.llm_openai_api_key,
@@ -81,7 +83,13 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
     if isinstance(job_queue, (SyncBatchJobQueue, InProcessBatchJobQueue)):
         job_queue.bind(orchestrator.run_batch_workflow)
 
-    query_service = QueryService(repository, embedding_index)
+    query_answerer = build_query_answerer(settings, llm_client)
+    query_service = QueryService(
+        repository,
+        embedding_index,
+        answerer=query_answerer,
+        settings=settings,
+    )
     approval_service = ApprovalService(
         repository=repository,
         tool_executor=tool_executor,
