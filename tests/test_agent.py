@@ -6,9 +6,18 @@ from meeting_assistant.schemas.planner import PlanResult
 from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.context import ContextBundle
 from meeting_assistant.services.planner import Planner, PlannerRuntimeState
-from meeting_assistant.services.tools import ToolExecutor, ToolValidator
+from meeting_assistant.core.config import Settings
+from meeting_assistant.services.tools import ToolExecutor, ToolValidator, build_tool_providers
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+
+def build_tool_executor(repository: Repository) -> ToolExecutor:
+    return ToolExecutor(
+        repository,
+        providers=build_tool_providers(Settings()),
+        sleep_fn=lambda _: None,
+    )
 
 
 def build_repository() -> Repository:
@@ -61,7 +70,7 @@ def test_agent_runtime_stops_when_no_more_tool_calls() -> None:
             ]
         ),
         tool_validator=ToolValidator(),
-        tool_executor=ToolExecutor(repository, sleep_fn=lambda _: None),
+        tool_executor=build_tool_executor(repository),
         max_iterations=4,
     )
     workflow_run_id = build_workflow_run(repository)
@@ -93,7 +102,7 @@ def test_agent_runtime_pauses_on_approval() -> None:
             ]
         ),
         tool_validator=ToolValidator(),
-        tool_executor=ToolExecutor(repository, sleep_fn=lambda _: None),
+        tool_executor=build_tool_executor(repository),
         max_iterations=4,
     )
     workflow_run_id = build_workflow_run(repository)
@@ -130,7 +139,7 @@ def test_agent_runtime_resume_after_approval() -> None:
             ]
         ),
         tool_validator=ToolValidator(),
-        tool_executor=ToolExecutor(repository, sleep_fn=lambda _: None),
+        tool_executor=build_tool_executor(repository),
         max_iterations=4,
     )
     workflow_run_id = build_workflow_run(repository)
@@ -144,7 +153,7 @@ def test_agent_runtime_resume_after_approval() -> None:
     assert paused.status == "awaiting_approval"
 
     approval = repository.list_approval_requests(workflow_run_id)[0]
-    ToolExecutor(repository, sleep_fn=lambda _: None).finalize_approval(approval.tool_execution_id, approved=True)
+    build_tool_executor(repository).finalize_approval(approval.tool_execution_id, approved=True)
     repository.update_agent_step_for_tool(workflow_run_id, approval.tool_name, "executed")
 
     resumed = runtime.resume(
@@ -170,7 +179,7 @@ def test_agent_runtime_loop_guard_stops_repeated_calls() -> None:
         repository=repository,
         planner=StubPlanner(plans=[repeated_plan, repeated_plan, repeated_plan]),
         tool_validator=ToolValidator(),
-        tool_executor=ToolExecutor(repository, sleep_fn=lambda _: None),
+        tool_executor=build_tool_executor(repository),
         max_iterations=4,
     )
     workflow_run_id = build_workflow_run(repository)

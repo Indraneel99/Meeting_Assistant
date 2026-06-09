@@ -1,7 +1,8 @@
+from meeting_assistant.core.config import Settings
 from meeting_assistant.db.models import Base
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.planner import ToolCall
-from meeting_assistant.services.tools import ToolExecutor
+from meeting_assistant.services.tools import ToolExecutor, build_tool_providers
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -18,7 +19,7 @@ def test_calendar_tool_requires_approval() -> None:
     user = repository.get_or_create_user("tool-user", "tool-user@example.com")
     meeting = repository.create_meeting(user.id, "Sync", None, "Transcript")
     workflow_run = repository.create_workflow_run(meeting.id)
-    executor = ToolExecutor(repository, sleep_fn=lambda _: None)
+    executor = ToolExecutor(repository, providers=build_tool_providers(Settings()), sleep_fn=lambda _: None)
 
     execution = executor.execute(
         workflow_run_id=workflow_run.id,
@@ -39,7 +40,13 @@ def test_retryable_failure_moves_to_dlq_style_failure() -> None:
     user = repository.get_or_create_user("tool-user", "tool-user@example.com")
     meeting = repository.create_meeting(user.id, "Sync", None, "Transcript")
     workflow_run = repository.create_workflow_run(meeting.id)
-    executor = ToolExecutor(repository, max_retries=3, backoff_seconds=0, sleep_fn=lambda _: None)
+    executor = ToolExecutor(
+        repository,
+        providers=build_tool_providers(Settings()),
+        max_retries=3,
+        backoff_seconds=0,
+        sleep_fn=lambda _: None,
+    )
 
     execution = executor.execute(
         workflow_run_id=workflow_run.id,
@@ -63,7 +70,7 @@ def test_duplicate_execution_reuses_existing_terminal_result() -> None:
     user = repository.get_or_create_user("tool-user", "tool-user@example.com")
     meeting = repository.create_meeting(user.id, "Sync", None, "Transcript")
     workflow_run = repository.create_workflow_run(meeting.id)
-    executor = ToolExecutor(repository, sleep_fn=lambda _: None)
+    executor = ToolExecutor(repository, providers=build_tool_providers(Settings()), sleep_fn=lambda _: None)
     tool_call = ToolCall(tool_name="email.send", payload={"subject": "Follow-up", "body": "Please send this"})
 
     first = executor.execute(workflow_run_id=workflow_run.id, tool_call=tool_call)

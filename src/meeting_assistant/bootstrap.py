@@ -16,7 +16,7 @@ from meeting_assistant.services.orchestrator import BatchOrchestrator
 from meeting_assistant.services.planner import HeuristicPlanner, OpenAIPlanner, PlannerRouter
 from meeting_assistant.services.query import QueryService
 from meeting_assistant.services.queue import build_transcript_queue
-from meeting_assistant.services.tools import ToolExecutor, ToolValidator
+from meeting_assistant.services.tools import ToolExecutor, ToolValidator, build_sleep_fn, build_tool_providers
 
 
 def bootstrap_container(settings: Settings | None = None) -> Container:
@@ -54,8 +54,10 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
     tool_validator = ToolValidator()
     tool_executor = ToolExecutor(
         repository,
+        providers=build_tool_providers(settings),
         max_retries=settings.tool_execution_max_retries,
         backoff_seconds=settings.tool_execution_backoff_seconds,
+        sleep_fn=build_sleep_fn(settings),
     )
     agent_runtime = AgentRuntime(
         repository=repository,

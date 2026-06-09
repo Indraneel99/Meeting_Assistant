@@ -3,89 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass
-from typing import Callable, Protocol
+from collections.abc import Callable
 
 from meeting_assistant.db.models import ToolExecutionStatus
-from meeting_assistant.schemas.planner import ToolCall
 from meeting_assistant.repositories import Repository
-
-
-class ToolValidator:
-    def validate(self, tool_calls: list[ToolCall], max_iterations: int = 10) -> list[ToolCall]:
-        seen: set[tuple[str, str]] = set()
-        validated: list[ToolCall] = []
-
-        for tool_call in tool_calls[:max_iterations]:
-            payload_blob = json.dumps(tool_call.payload, sort_keys=True)
-            signature = (tool_call.tool_name, payload_blob)
-            if signature in seen:
-                continue
-            seen.add(signature)
-            validated.append(tool_call)
-
-        return validated
-
-
-class RetryableToolError(Exception):
-    pass
-
-
-class ToolProvider(Protocol):
-    def execute(self, payload: dict[str, str]) -> dict[str, object]:
-        ...
-
-
-class EmailToolProvider:
-    def execute(self, payload: dict[str, str]) -> dict[str, object]:
-        if payload.get("simulate_retryable_failure") == "true":
-            raise RetryableToolError("Simulated transient email delivery failure.")
-        return {
-            "provider": "sendgrid",
-            "delivery_status": "queued",
-            "subject": payload.get("subject", ""),
-        }
-
-
-class CalendarToolProvider:
-    def execute(self, payload: dict[str, str]) -> dict[str, object]:
-        return {
-            "provider": "google-calendar",
-            "approval_required": True,
-            "approval_request_id": hashlib.sha256(
-                json.dumps(payload, sort_keys=True).encode()
-            ).hexdigest()[:12],
-        }
-
-    def execute_after_approval(self, payload: dict[str, str]) -> dict[str, object]:
-        event_key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
-        return {
-            "provider": "google-calendar",
-            "event_id": f"evt_{event_key}",
-            "status": "created",
-            "title": payload.get("title", ""),
-            "message": "Calendar event created after approval.",
-        }
-
-
-class WebhookToolProvider:
-    def execute(self, payload: dict[str, str]) -> dict[str, object]:
-        if payload.get("simulate_retryable_failure") == "true":
-            raise RetryableToolError("Simulated transient webhook failure.")
-        return {
-            "provider": "webhook",
-            "delivery_status": "accepted",
-            "target": payload.get("target", "unknown"),
-        }
-
-
-@dataclass(slots=True)
-class ToolExecutionOutcome:
-    status: str
-    result: dict[str, object]
-    attempts: int
-    idempotency_key: str
-    reused: bool = False
+from meeting_assistant.schemas.planner import ToolCall
+from meeting_assistant.services.tools.base import (
+    RetryableToolError,
+    ToolExecutionOutcome,
+    ToolProvider,
+)
 
 
 class ToolExecutor:
@@ -93,6 +20,7 @@ class ToolExecutor:
         self,
         repository: Repository,
         *,
+        providers: dict[str, ToolProvider] | None = None,
         max_retries: int = 3,
         backoff_seconds: float = 1.0,
         sleep_fn: Callable[[float], None] | None = None,
@@ -101,12 +29,7 @@ class ToolExecutor:
         self.max_retries = max_retries
         self.backoff_seconds = backoff_seconds
         self.sleep_fn = sleep_fn or time.sleep
-        self.providers: dict[str, ToolProvider] = {
-            "email.send": EmailToolProvider(),
-            "calendar.create_event": CalendarToolProvider(),
-            "slack.notify": WebhookToolProvider(),
-            "jira.create_issue": WebhookToolProvider(),
-        }
+        self.providers = providers or {}
 
     def execute(self, workflow_run_id: int, tool_call: ToolCall) -> ToolExecutionOutcome:
         payload_blob = json.dumps(tool_call.payload, sort_keys=True)
@@ -158,7 +81,7 @@ class ToolExecutor:
         last_error: str | None = None
         for attempt_number in range(1, self.max_retries + 1):
             try:
-                provider_result = provider.execute(tool_call.payload)
+                provider_result = provider.execute(tool_call.payload, idempotency_key=idempotency_key)
                 if provider_result.get("approval_required"):
                     result = {
                         "message": "Calendar action requires human approval.",
@@ -253,9 +176,12 @@ class ToolExecutor:
             if provider is None:
                 raise ValueError(f"Unsupported tool: {execution.tool_name}")
             if hasattr(provider, "execute_after_approval"):
-                provider_result = provider.execute_after_approval(payload)
+                provider_result = provider.execute_after_approval(
+                    payload,
+                    idempotency_key=execution.idempotency_key,
+                )
             else:
-                provider_result = provider.execute(payload)
+                provider_result = provider.execute(payload, idempotency_key=execution.idempotency_key)
             result = {"message": f"Approved and executed {execution.tool_name}", **provider_result}
             self.repository.create_tool_execution_attempt(
                 execution.id,
