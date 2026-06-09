@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from meeting_assistant.repositories import Repository
-from meeting_assistant.services.embeddings import InMemoryEmbeddingIndex
+from meeting_assistant.services.embeddings import EmbeddingIndex
 
 
 @dataclass(slots=True)
@@ -11,7 +11,7 @@ class ContextBundle:
 
 
 class ContextLoader:
-    def __init__(self, repository: Repository, embedding_index: InMemoryEmbeddingIndex) -> None:
+    def __init__(self, repository: Repository, embedding_index: EmbeddingIndex) -> None:
         self.repository = repository
         self.embedding_index = embedding_index
 

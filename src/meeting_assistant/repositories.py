@@ -154,7 +154,7 @@ class Repository:
                 raise ValueError(f"Meeting {meeting_id} not found")
 
             meeting.summary_text = summary_text
-            meeting.summary_embedding = json.dumps(summary_embedding)
+            meeting.summary_embedding = summary_embedding
 
             session.query(TaskItem).filter(TaskItem.meeting_id == meeting_id).delete()
             session.query(Decision).filter(Decision.meeting_id == meeting_id).delete()
@@ -323,6 +323,39 @@ class Repository:
         with self.session_factory() as session:
             statement = select(Meeting).where(Meeting.user_id == user_id, Meeting.summary_text != "")
             return list(session.scalars(statement))
+
+    def search_meetings_by_embedding(
+        self,
+        user_id: int,
+        query_embedding: list[float],
+        limit: int,
+    ) -> list[dict[str, object]]:
+        with self.session_factory() as session:
+            distance_expr = Meeting.summary_embedding.cosine_distance(query_embedding)
+            statement = (
+                select(Meeting, distance_expr.label("distance"))
+                .where(
+                    Meeting.user_id == user_id,
+                    Meeting.summary_text != "",
+                    Meeting.summary_embedding.is_not(None),
+                )
+                .order_by(distance_expr)
+                .limit(limit)
+            )
+            results = []
+            for meeting, distance in session.execute(statement):
+                score = max(0.0, 1.0 - float(distance))
+                if score <= 0:
+                    continue
+                results.append(
+                    {
+                        "meeting_id": meeting.id,
+                        "title": meeting.title,
+                        "summary": meeting.summary_text,
+                        "score": round(score, 4),
+                    }
+                )
+            return results
 
     def get_tasks_for_meeting(self, meeting_id: int) -> list[TaskItem]:
         with self.session_factory() as session:

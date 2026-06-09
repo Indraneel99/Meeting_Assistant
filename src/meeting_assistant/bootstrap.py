@@ -8,7 +8,7 @@ from meeting_assistant.repositories import Repository
 from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.asr import BatchASRAdapter, LocalAudioSourceResolver, OpenAIHostedASRClient
 from meeting_assistant.services.context import ContextLoader
-from meeting_assistant.services.embeddings import InMemoryEmbeddingIndex
+from meeting_assistant.services.embeddings import build_embedding_index
 from meeting_assistant.services.normalizer import TranscriptNormalizer
 from meeting_assistant.services.orchestrator import BatchOrchestrator
 from meeting_assistant.services.planner import HeuristicPlanner, OpenAIPlanner, PlannerRouter
@@ -23,7 +23,7 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
 
     repository = Repository(SessionLocal)
     queue = InMemoryTranscriptQueue()
-    embedding_index = InMemoryEmbeddingIndex()
+    embedding_index = build_embedding_index(settings)
     asr_http_client = httpx.Client(timeout=settings.asr_openai_timeout_seconds)
     source_resolver = LocalAudioSourceResolver(asr_http_client)
     hosted_asr = OpenAIHostedASRClient(

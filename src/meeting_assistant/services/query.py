@@ -9,11 +9,11 @@ from meeting_assistant.schemas.retrieval import (
     QueryResponse,
     SearchMeetingsResponse,
 )
-from meeting_assistant.services.embeddings import InMemoryEmbeddingIndex
+from meeting_assistant.services.embeddings import EmbeddingIndex
 
 
 class QueryService:
-    def __init__(self, repository: Repository, embedding_index: InMemoryEmbeddingIndex) -> None:
+    def __init__(self, repository: Repository, embedding_index: EmbeddingIndex) -> None:
         self.repository = repository
         self.embedding_index = embedding_index
 

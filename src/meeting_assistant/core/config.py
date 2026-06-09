@@ -6,6 +6,16 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./meeting_assistant.db"
     database_pool_size: int = 5
     database_max_overflow: int = 10
+    embedding_provider: str = "heuristic"
+    embedding_fallback_provider: str = "heuristic"
+    embedding_dimensions: int = 1536
+    embedding_openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MEETING_ASSISTANT_EMBEDDING_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
+    embedding_openai_base_url: str = "https://api.openai.com/v1"
+    embedding_openai_model: str = "text-embedding-3-small"
+    embedding_openai_timeout_seconds: float = 30.0
     chunk_size_words: int = 120
     recent_summary_limit: int = 3
     semantic_context_limit: int = 5
