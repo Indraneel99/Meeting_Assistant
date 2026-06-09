@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import EmailStr
 
-from meeting_assistant.api.deps import get_container
+from meeting_assistant.api.auth import assert_user_scope
+from meeting_assistant.api.deps import get_container, get_principal
+from meeting_assistant.api.rate_limit import limiter
 from meeting_assistant.container import Container
 from meeting_assistant.schemas.batch import BatchJobAcceptedResponse, BatchMeetingRequest, BatchMeetingResponse
 from meeting_assistant.services.asr import ASRError
@@ -30,16 +32,21 @@ def _submit_batch(
 
 
 @router.post("/meetings/batch", response_model=BatchMeetingResponse | BatchJobAcceptedResponse)
+@limiter.limit("10/minute")
 def ingest_batch_meeting(
+    request: Request,
     payload: BatchMeetingRequest,
     response: Response,
     container: Container = Depends(get_container),
 ) -> BatchMeetingResponse | BatchJobAcceptedResponse:
+    assert_user_scope(get_principal(request), payload.user_external_id)
     return _submit_batch(payload, response, container)
 
 
 @router.post("/meetings/batch/upload", response_model=BatchMeetingResponse | BatchJobAcceptedResponse)
+@limiter.limit("10/minute")
 async def ingest_batch_meeting_upload(
+    request: Request,
     response: Response,
     user_external_id: str = Form(..., min_length=1),
     user_email: EmailStr = Form(...),
@@ -47,6 +54,7 @@ async def ingest_batch_meeting_upload(
     audio: UploadFile = File(...),
     container: Container = Depends(get_container),
 ) -> BatchMeetingResponse | BatchJobAcceptedResponse:
+    assert_user_scope(get_principal(request), user_external_id)
     content = await audio.read()
     filename = audio.filename or "audio.bin"
     content_type = audio.content_type or "application/octet-stream"

@@ -77,6 +77,23 @@ class Settings(BaseSettings):
     queue_provider: str = "memory"
     job_queue_provider: str = "inprocess"
     redis_url: str = "redis://localhost:6379/0"
+    auth_enabled: bool = False
+    auth_mode: str = "api_key"
+    auth_api_keys: str = ""
+    auth_jwt_secret: str | None = None
+    auth_jwt_algorithm: str = "HS256"
+    auth_jwt_audience: str | None = None
+    log_level: str = "INFO"
+    log_json: bool = False
+    otel_enabled: bool = False
+    otel_service_name: str = "meeting-assistant"
+    otel_exporter_endpoint: str | None = None
+    rate_limit_enabled: bool = False
+    rate_limit_default: str = "120/minute"
+    rate_limit_batch: str = "10/minute"
+    rate_limit_query: str = "30/minute"
+    readiness_check_redis: bool = True
+    readiness_check_embedder: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

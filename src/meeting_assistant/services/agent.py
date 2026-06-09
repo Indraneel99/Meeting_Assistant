@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from meeting_assistant.db.models import WorkflowStatus
 from meeting_assistant.repositories import Repository
-from meeting_assistant.schemas.planner import PlanResult, PlannedDecision, PlannedTask, ToolCall
+from meeting_assistant.schemas.planner import PlannedDecision, PlannedTask, PlanResult
 from meeting_assistant.services.context import ContextBundle
 from meeting_assistant.services.planner import Planner, PlannerHistoryEntry, PlannerRuntimeState
 from meeting_assistant.services.tools import ToolExecutionOutcome, ToolExecutor, ToolValidator

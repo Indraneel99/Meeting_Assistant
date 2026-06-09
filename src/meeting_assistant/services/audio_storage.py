@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from meeting_assistant.core.config import Settings
-from meeting_assistant.services.asr import ASRError, ASRErrorCode, validate_audio_asset, AudioAsset
+from meeting_assistant.services.asr import ASRError, ASRErrorCode, AudioAsset, validate_audio_asset
 
 logger = logging.getLogger("uvicorn.error")
 
