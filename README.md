@@ -54,25 +54,6 @@ export MEETING_ASSISTANT_EMBEDDING_OPENAI_API_KEY="..."
 export MEETING_ASSISTANT_EMBEDDING_OPENAI_MODEL="text-embedding-3-small"
 ```
 
-Async batch processing returns `202 Accepted` with a workflow job id. Local development can run jobs in-process:
-
-```bash
-export MEETING_ASSISTANT_BATCH_PROCESSING_MODE="async"
-export MEETING_ASSISTANT_JOB_QUEUE_PROVIDER="inprocess"
-```
-
-Production-style async processing uses Redis + ARQ:
-
-```bash
-export MEETING_ASSISTANT_BATCH_PROCESSING_MODE="async"
-export MEETING_ASSISTANT_JOB_QUEUE_PROVIDER="arq"
-export MEETING_ASSISTANT_QUEUE_PROVIDER="redis"
-export MEETING_ASSISTANT_REDIS_URL="redis://localhost:6379/0"
-uv run arq meeting_assistant.worker.WorkerSettings
-```
-
-Poll workflow status with `GET /api/v1/workflows/{workflow_run_id}`.
-
 To enable hosted batch ASR for `source_uri` inputs, set:
 
 ```bash

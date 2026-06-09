@@ -41,10 +41,6 @@ class Settings(BaseSettings):
     asr_openai_language: str | None = None
     asr_openai_timeout_seconds: float = 120.0
     asr_openai_chunking_strategy: str = "auto"
-    batch_processing_mode: str = "sync"
-    queue_provider: str = "memory"
-    job_queue_provider: str = "inprocess"
-    redis_url: str = "redis://localhost:6379/0"
 
     model_config = SettingsConfigDict(
         env_file=".env",
