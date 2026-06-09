@@ -28,6 +28,9 @@ dev = [
 storage = [
   "google-cloud-storage>=2.18.0",
 ]
+tools = [
+  "google-auth>=2.29.0",
+]
 
 [build-system]
 requires = ["hatchling"]

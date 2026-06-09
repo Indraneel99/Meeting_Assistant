@@ -143,6 +143,38 @@ export MEETING_ASSISTANT_LLM_PROVIDER="openai"
 
 If no LLM API key is configured, the app falls back to the local heuristic planner so you can keep testing offline.
 
+Tool providers default to local stubs for offline development. Configure real integrations per tool:
+
+```bash
+# Email via SendGrid
+export MEETING_ASSISTANT_EMAIL_PROVIDER="sendgrid"
+export MEETING_ASSISTANT_EMAIL_SENDGRID_API_KEY="..."
+export MEETING_ASSISTANT_EMAIL_FROM_ADDRESS="noreply@yourdomain.com"
+export MEETING_ASSISTANT_EMAIL_DEFAULT_RECIPIENT="team@yourdomain.com"
+
+# Calendar via Google service account (requires: uv sync --extra tools)
+export MEETING_ASSISTANT_CALENDAR_PROVIDER="google"
+export MEETING_ASSISTANT_CALENDAR_GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
+export MEETING_ASSISTANT_CALENDAR_GOOGLE_CALENDAR_ID="primary"
+
+# Slack via incoming webhook or bot token
+export MEETING_ASSISTANT_SLACK_PROVIDER="webhook"
+export MEETING_ASSISTANT_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+
+# Jira REST API
+export MEETING_ASSISTANT_JIRA_PROVIDER="rest"
+export MEETING_ASSISTANT_JIRA_BASE_URL="https://your-org.atlassian.net"
+export MEETING_ASSISTANT_JIRA_USER_EMAIL="bot@yourdomain.com"
+export MEETING_ASSISTANT_JIRA_API_TOKEN="..."
+export MEETING_ASSISTANT_JIRA_PROJECT_KEY="ENG"
+```
+
+Retry backoff can run off the request thread when using async workers:
+
+```bash
+export MEETING_ASSISTANT_TOOL_EXECUTION_BACKOFF_MODE="background"
+```
+
 ## Test
 
 ```bash

@@ -9,6 +9,11 @@ class ToolPayload(TypedDict):
     title: str
     details: str
     target: str
+    recipient: str
+    channel: str
+    issue_summary: str
+    issue_description: str
+    issue_type: str
     simulate_retryable_failure: str
 
 
@@ -34,6 +39,11 @@ class ToolCall(BaseModel):
             "title": "",
             "details": "",
             "target": "",
+            "recipient": "",
+            "channel": "",
+            "issue_summary": "",
+            "issue_description": "",
+            "issue_type": "",
             "simulate_retryable_failure": "",
             **payload,
         }

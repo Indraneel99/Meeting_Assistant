@@ -109,6 +109,20 @@ class HeuristicPlanner:
                         payload={"title": title, "details": sentence},
                     )
                 )
+            if "slack" in lowered:
+                tool_calls.append(
+                    ToolCall(
+                        tool_name="slack.notify",
+                        payload={"channel": "general", "body": sentence},
+                    )
+                )
+            if "jira" in lowered or "ticket" in lowered:
+                tool_calls.append(
+                    ToolCall(
+                        tool_name="jira.create_issue",
+                        payload={"issue_summary": sentence, "issue_description": sentence},
+                    )
+                )
 
         if not tasks and sentences:
             tasks.append(PlannedTask(assignee="unassigned", action=f"Review outcomes from {title}"))
@@ -148,11 +162,12 @@ def build_planner_messages(
         "- Keep the summary short and factual.\n"
         "- Extract concrete tasks with assignee when present, otherwise use 'unassigned'.\n"
         "- Extract important decisions with a clear topic.\n"
-        "- Only create tool calls when the meeting explicitly asks for an email or a calendar action.\n"
+        "- Only create tool calls when the meeting explicitly asks for an email, calendar, Slack, or Jira action.\n"
         "- Do not repeat a tool call that already succeeded or is awaiting approval in the execution history.\n"
         "- If previous tool results already satisfy the request, return no tool calls.\n"
-        "- Use tool names email.send and calendar.create_event.\n"
-        "- Tool payloads must include subject, body, title, details, target, and simulate_retryable_failure. "
+        "- Use tool names email.send, calendar.create_event, slack.notify, and jira.create_issue.\n"
+        "- Tool payloads must include subject, body, title, details, target, recipient, channel, "
+        "issue_summary, issue_description, issue_type, and simulate_retryable_failure. "
         "Use empty strings for irrelevant payload fields.\n"
     )
     return [
