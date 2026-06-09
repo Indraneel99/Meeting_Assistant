@@ -46,6 +46,14 @@ export MEETING_ASSISTANT_DATABASE_MAX_OVERFLOW="10"
 uv run alembic upgrade head
 ```
 
+Embeddings default to the local heuristic embedder for offline development. On Postgres, semantic search uses stored `summary_embedding` vectors with pgvector. To enable hosted embeddings:
+
+```bash
+export MEETING_ASSISTANT_EMBEDDING_PROVIDER="openai"
+export MEETING_ASSISTANT_EMBEDDING_OPENAI_API_KEY="..."
+export MEETING_ASSISTANT_EMBEDDING_OPENAI_MODEL="text-embedding-3-small"
+```
+
 To enable hosted batch ASR for `source_uri` inputs, set:
 
 ```bash

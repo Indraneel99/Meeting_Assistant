@@ -7,6 +7,8 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstr
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from meeting_assistant.db.types import EmbeddingVector
+
 
 class Base(DeclarativeBase):
     pass
@@ -53,7 +55,7 @@ class Meeting(Base):
     source_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
     transcript_text: Mapped[str] = mapped_column(Text)
     summary_text: Mapped[str] = mapped_column(Text, default="")
-    summary_embedding: Mapped[str] = mapped_column(Text, default="[]")
+    summary_embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user: Mapped["User"] = relationship(back_populates="meetings")

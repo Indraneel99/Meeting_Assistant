@@ -9,7 +9,7 @@ from meeting_assistant.schemas.batch import BatchMeetingRequest
 from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.asr import BatchASRAdapter
 from meeting_assistant.services.context import ContextLoader
-from meeting_assistant.services.embeddings import InMemoryEmbeddingIndex
+from meeting_assistant.services.embeddings import EmbeddingIndex
 from meeting_assistant.services.normalizer import TranscriptNormalizer
 from meeting_assistant.services.queue import InMemoryTranscriptQueue
 
@@ -21,7 +21,7 @@ class BatchOrchestrator:
     asr: BatchASRAdapter
     normalizer: TranscriptNormalizer
     context_loader: ContextLoader
-    embedding_index: InMemoryEmbeddingIndex
+    embedding_index: EmbeddingIndex
     agent_runtime: AgentRuntime
 
     def process_batch_meeting(self, payload: BatchMeetingRequest) -> dict[str, object]:
