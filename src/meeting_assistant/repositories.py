@@ -175,6 +175,24 @@ class Repository:
             session.refresh(meeting)
             return meeting
 
+    def get_workflow_run(self, workflow_run_id: int) -> WorkflowRun | None:
+        with self.session_factory() as session:
+            return session.get(WorkflowRun, workflow_run_id)
+
+    def get_user_by_id(self, user_id: int) -> User | None:
+        with self.session_factory() as session:
+            return session.get(User, user_id)
+
+    def update_meeting_transcript(self, meeting_id: int, transcript_text: str) -> Meeting:
+        with self.session_factory() as session:
+            meeting = session.get(Meeting, meeting_id)
+            if meeting is None:
+                raise ValueError(f"Meeting {meeting_id} not found")
+            meeting.transcript_text = transcript_text
+            session.commit()
+            session.refresh(meeting)
+            return meeting
+
     def create_tool_execution(
         self,
         workflow_run_id: int,
