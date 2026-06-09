@@ -89,11 +89,18 @@ class Repository:
             session.refresh(run)
             return run
 
-    def replace_chunks(self, meeting_id: int, chunks: Sequence[str]) -> None:
+    def replace_chunks(self, meeting_id: int, chunks: Sequence[tuple[str, list[float]]]) -> None:
         with self.session_factory() as session:
             session.query(MeetingChunk).filter(MeetingChunk.meeting_id == meeting_id).delete()
-            for index, text in enumerate(chunks):
-                session.add(MeetingChunk(meeting_id=meeting_id, chunk_index=index, text=text))
+            for index, (text, embedding) in enumerate(chunks):
+                session.add(
+                    MeetingChunk(
+                        meeting_id=meeting_id,
+                        chunk_index=index,
+                        text=text,
+                        chunk_embedding=embedding,
+                    )
+                )
             session.commit()
 
     def save_transcript_artifact(self, meeting_id: int, transcript: TranscriptDocument) -> None:
@@ -171,6 +178,7 @@ class Repository:
                         meeting_id=meeting_id,
                         topic=decision["topic"],
                         decision_text=decision["decision_text"],
+                        topic_embedding=decision.get("topic_embedding", []),
                     )
                 )
 
@@ -423,12 +431,146 @@ class Repository:
             statement = select(Meeting).where(Meeting.user_id == user_id, Meeting.summary_text != "")
             return list(session.scalars(statement))
 
+    def get_tasks_for_meeting(self, meeting_id: int) -> list[TaskItem]:
+        with self.session_factory() as session:
+            statement = select(TaskItem).where(TaskItem.meeting_id == meeting_id)
+            return list(session.scalars(statement))
+
+    def get_decisions_for_user(self, user_id: int) -> list[Decision]:
+        with self.session_factory() as session:
+            statement = select(Decision).join(Meeting).where(Meeting.user_id == user_id)
+            return list(session.scalars(statement))
+
+    def get_chunks_for_user(self, user_id: int) -> list[tuple[MeetingChunk, str]]:
+        with self.session_factory() as session:
+            statement = (
+                select(MeetingChunk, Meeting.title)
+                .join(Meeting)
+                .where(Meeting.user_id == user_id)
+            )
+            return [(chunk, title) for chunk, title in session.execute(statement)]
+
+    def search_chunks_by_embedding(
+        self,
+        user_id: int,
+        query_embedding: list[float],
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        from meeting_assistant.services.retrieval_pagination import decode_cursor, encode_cursor
+
+        with self.session_factory() as session:
+            distance_expr = MeetingChunk.chunk_embedding.cosine_distance(query_embedding)
+            statement = (
+                select(MeetingChunk, Meeting.title, distance_expr.label("distance"))
+                .join(Meeting)
+                .where(
+                    Meeting.user_id == user_id,
+                    MeetingChunk.chunk_embedding.is_not(None),
+                )
+                .order_by(distance_expr, MeetingChunk.id.desc())
+            )
+            if cursor:
+                cursor_score, cursor_id = decode_cursor(cursor)
+                statement = statement.where(
+                    (distance_expr > (1.0 - cursor_score))
+                    | (
+                        (distance_expr == (1.0 - cursor_score))
+                        & (MeetingChunk.id < cursor_id)
+                    )
+                )
+
+            rows = list(session.execute(statement.limit(limit + 1)))
+            results: list[dict[str, object]] = []
+            for chunk, title, distance in rows:
+                score = max(0.0, 1.0 - float(distance))
+                if score <= 0:
+                    continue
+                results.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "meeting_id": chunk.meeting_id,
+                        "meeting_title": title,
+                        "chunk_index": chunk.chunk_index,
+                        "text": chunk.text,
+                        "score": round(score, 4),
+                    }
+                )
+
+            has_more = len(results) > limit
+            page = results[:limit]
+            next_cursor = None
+            if has_more and page:
+                last = page[-1]
+                next_cursor = encode_cursor(float(last["score"]), int(last["chunk_id"]))
+            return page, next_cursor, has_more
+
+    def search_decisions_by_embedding(
+        self,
+        user_id: int,
+        query_embedding: list[float],
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        from meeting_assistant.services.retrieval_pagination import decode_cursor, encode_cursor
+
+        with self.session_factory() as session:
+            distance_expr = Decision.topic_embedding.cosine_distance(query_embedding)
+            statement = (
+                select(Decision, distance_expr.label("distance"))
+                .join(Meeting)
+                .where(
+                    Meeting.user_id == user_id,
+                    Decision.topic_embedding.is_not(None),
+                )
+                .order_by(distance_expr, Decision.id.desc())
+            )
+            if cursor:
+                cursor_score, cursor_id = decode_cursor(cursor)
+                statement = statement.where(
+                    (distance_expr > (1.0 - cursor_score))
+                    | (
+                        (distance_expr == (1.0 - cursor_score))
+                        & (Decision.id < cursor_id)
+                    )
+                )
+
+            rows = list(session.execute(statement.limit(limit + 1)))
+            results: list[dict[str, object]] = []
+            for decision, distance in rows:
+                score = max(0.0, 1.0 - float(distance))
+                if score <= 0:
+                    continue
+                results.append(
+                    {
+                        "decision_id": decision.id,
+                        "meeting_id": decision.meeting_id,
+                        "topic": decision.topic,
+                        "decision_text": decision.decision_text,
+                        "score": round(score, 4),
+                    }
+                )
+
+            has_more = len(results) > limit
+            page = results[:limit]
+            next_cursor = None
+            if has_more and page:
+                last = page[-1]
+                next_cursor = encode_cursor(float(last["score"]), int(last["decision_id"]))
+            return page, next_cursor, has_more
+
     def search_meetings_by_embedding(
         self,
         user_id: int,
         query_embedding: list[float],
         limit: int,
-    ) -> list[dict[str, object]]:
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        from meeting_assistant.services.retrieval_pagination import decode_cursor, encode_cursor
+
         with self.session_factory() as session:
             distance_expr = Meeting.summary_embedding.cosine_distance(query_embedding)
             statement = (
@@ -438,11 +580,21 @@ class Repository:
                     Meeting.summary_text != "",
                     Meeting.summary_embedding.is_not(None),
                 )
-                .order_by(distance_expr)
-                .limit(limit)
+                .order_by(distance_expr, Meeting.id.desc())
             )
-            results = []
-            for meeting, distance in session.execute(statement):
+            if cursor:
+                cursor_score, cursor_id = decode_cursor(cursor)
+                statement = statement.where(
+                    (distance_expr > (1.0 - cursor_score))
+                    | (
+                        (distance_expr == (1.0 - cursor_score))
+                        & (Meeting.id < cursor_id)
+                    )
+                )
+
+            rows = list(session.execute(statement.limit(limit + 1)))
+            results: list[dict[str, object]] = []
+            for meeting, distance in rows:
                 score = max(0.0, 1.0 - float(distance))
                 if score <= 0:
                     continue
@@ -454,14 +606,11 @@ class Repository:
                         "score": round(score, 4),
                     }
                 )
-            return results
 
-    def get_tasks_for_meeting(self, meeting_id: int) -> list[TaskItem]:
-        with self.session_factory() as session:
-            statement = select(TaskItem).where(TaskItem.meeting_id == meeting_id)
-            return list(session.scalars(statement))
-
-    def get_decisions_for_user(self, user_id: int) -> list[Decision]:
-        with self.session_factory() as session:
-            statement = select(Decision).join(Meeting).where(Meeting.user_id == user_id)
-            return list(session.scalars(statement))
+            has_more = len(results) > limit
+            page = results[:limit]
+            next_cursor = None
+            if has_more and page:
+                last = page[-1]
+                next_cursor = encode_cursor(float(last["score"]), int(last["meeting_id"]))
+            return page, next_cursor, has_more

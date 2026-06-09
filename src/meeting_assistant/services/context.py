@@ -17,7 +17,12 @@ class ContextLoader:
 
     def load(self, user_id: int, transcript_text: str, recent_limit: int = 3, relevant_limit: int = 5) -> ContextBundle:
         recent = self.repository.list_recent_meetings(user_id, recent_limit)
-        relevant = self.embedding_index.search_for_user(self.repository, user_id, transcript_text, relevant_limit)
+        relevant, _, _ = self.embedding_index.search_for_user(
+            self.repository,
+            user_id,
+            transcript_text,
+            relevant_limit,
+        )
         return ContextBundle(
             recent_summaries=[meeting.summary_text for meeting in recent],
             relevant_summaries=[item["summary"] for item in relevant],

@@ -80,6 +80,7 @@ class MeetingChunk(Base):
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), index=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
+    chunk_embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(), default=list)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="chunks")
 
@@ -155,6 +156,7 @@ class Decision(Base):
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), index=True)
     topic: Mapped[str] = mapped_column(String(255))
     decision_text: Mapped[str] = mapped_column(Text)
+    topic_embedding: Mapped[list[float]] = mapped_column(EmbeddingVector(), default=list)
 
     meeting: Mapped["Meeting"] = relationship(back_populates="decisions")
 

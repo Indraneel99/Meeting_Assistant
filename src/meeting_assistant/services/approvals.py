@@ -86,7 +86,16 @@ class ApprovalService:
             summary_text=agent_result.summary,
             summary_embedding=embedding,
             tasks=[task.model_dump() for task in agent_result.tasks],
-            decisions=[decision.model_dump() for decision in agent_result.decisions],
+            decisions=[
+                {
+                    "topic": decision.topic,
+                    "decision_text": decision.decision_text,
+                    "topic_embedding": self.embedding_index.embed(
+                        f"{decision.topic}: {decision.decision_text}"
+                    ),
+                }
+                for decision in agent_result.decisions
+            ],
         )
         self.repository.update_workflow_status(request.workflow_run_id, WorkflowStatus(agent_result.status))
 

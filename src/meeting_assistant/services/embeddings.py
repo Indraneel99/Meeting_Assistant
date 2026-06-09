@@ -5,13 +5,14 @@ import logging
 import math
 from collections import Counter
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 from openai import OpenAI
 
 from meeting_assistant.core.config import Settings
 from meeting_assistant.repositories import Repository
+from meeting_assistant.services.retrieval_pagination import paginate_scored_results
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -67,7 +68,31 @@ class EmbeddingIndex(Protocol):
         user_id: int,
         query: str,
         limit: int,
-    ) -> list[dict[str, object]]:
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        ...
+
+    def search_chunks_for_user(
+        self,
+        repository: Repository,
+        user_id: int,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        ...
+
+    def search_decisions_for_user(
+        self,
+        repository: Repository,
+        user_id: int,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
         ...
 
 
@@ -153,7 +178,9 @@ class InMemoryEmbeddingIndex:
         user_id: int,
         query: str,
         limit: int,
-    ) -> list[dict[str, object]]:
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
         query_embedding = self.embed(query)
         meetings = repository.get_meetings_for_user(user_id)
         scored = []
@@ -171,8 +198,67 @@ class InMemoryEmbeddingIndex:
                         "score": round(score, 4),
                     }
                 )
-        scored.sort(key=lambda item: item["score"], reverse=True)
-        return scored[:limit]
+        scored.sort(key=lambda item: (item["score"], item["meeting_id"]), reverse=True)
+        return paginate_scored_results(scored, limit=limit, cursor=cursor, id_key="meeting_id")
+
+    def search_chunks_for_user(
+        self,
+        repository: Repository,
+        user_id: int,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        query_embedding = self.embed(query)
+        scored = []
+        for chunk, title in repository.get_chunks_for_user(user_id):
+            stored_embedding = parse_embedding(chunk.chunk_embedding)
+            if not stored_embedding:
+                continue
+            score = cosine_similarity(query_embedding, stored_embedding)
+            if score > 0:
+                scored.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "meeting_id": chunk.meeting_id,
+                        "meeting_title": title,
+                        "chunk_index": chunk.chunk_index,
+                        "text": chunk.text,
+                        "score": round(score, 4),
+                    }
+                )
+        scored.sort(key=lambda item: (item["score"], item["chunk_id"]), reverse=True)
+        return paginate_scored_results(scored, limit=limit, cursor=cursor, id_key="chunk_id")
+
+    def search_decisions_for_user(
+        self,
+        repository: Repository,
+        user_id: int,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        query_embedding = self.embed(query)
+        scored = []
+        for decision in repository.get_decisions_for_user(user_id):
+            stored_embedding = parse_embedding(decision.topic_embedding)
+            if not stored_embedding:
+                continue
+            score = cosine_similarity(query_embedding, stored_embedding)
+            if score > 0:
+                scored.append(
+                    {
+                        "decision_id": decision.id,
+                        "meeting_id": decision.meeting_id,
+                        "topic": decision.topic,
+                        "decision_text": decision.decision_text,
+                        "score": round(score, 4),
+                    }
+                )
+        scored.sort(key=lambda item: (item["score"], item["decision_id"]), reverse=True)
+        return paginate_scored_results(scored, limit=limit, cursor=cursor, id_key="decision_id")
 
 
 @dataclass(slots=True)
@@ -189,9 +275,50 @@ class PgVectorEmbeddingIndex:
         user_id: int,
         query: str,
         limit: int,
-    ) -> list[dict[str, object]]:
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
         query_embedding = self.embed(query)
-        return repository.search_meetings_by_embedding(user_id, query_embedding, limit)
+        return repository.search_meetings_by_embedding(
+            user_id,
+            query_embedding,
+            limit,
+            cursor=cursor,
+        )
+
+    def search_chunks_for_user(
+        self,
+        repository: Repository,
+        user_id: int,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        query_embedding = self.embed(query)
+        return repository.search_chunks_by_embedding(
+            user_id,
+            query_embedding,
+            limit,
+            cursor=cursor,
+        )
+
+    def search_decisions_for_user(
+        self,
+        repository: Repository,
+        user_id: int,
+        query: str,
+        limit: int,
+        *,
+        cursor: str | None = None,
+    ) -> tuple[list[dict[str, object]], str | None, bool]:
+        query_embedding = self.embed(query)
+        return repository.search_decisions_by_embedding(
+            user_id,
+            query_embedding,
+            limit,
+            cursor=cursor,
+        )
 
 
 def build_embedding_index(settings: Settings) -> EmbeddingIndex:

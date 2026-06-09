@@ -64,4 +64,7 @@ def test_batch_ingestion_and_retrieval() -> None:
             json={"user_external_id": user_external_id, "question": "What did we decide about the batch pipeline?"},
         )
         assert answer.status_code == 200
-        assert "Most relevant meeting" in answer.json()["answer"]
+        answer_payload = answer.json()
+        assert "batch pipeline" in answer_payload["answer"].lower()
+        assert answer_payload["citations"]
+        assert answer_payload["chunks"] or answer_payload["meetings"]

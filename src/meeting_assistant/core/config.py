@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     chunk_size_words: int = 120
     recent_summary_limit: int = 3
     semantic_context_limit: int = 5
+    query_provider: str = "heuristic"
+    query_openai_model: str = "gpt-5.4-mini"
+    query_top_k_meetings: int = 3
+    query_top_k_chunks: int = 5
+    query_top_k_decisions: int = 3
     max_tool_calls_per_session: int = 10
     llm_provider: str = "openai"
     llm_fallback_provider: str = "heuristic"
