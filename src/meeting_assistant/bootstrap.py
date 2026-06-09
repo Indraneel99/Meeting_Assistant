@@ -8,12 +8,13 @@ from meeting_assistant.repositories import Repository
 from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.asr import BatchASRAdapter, LocalAudioSourceResolver, OpenAIHostedASRClient
 from meeting_assistant.services.context import ContextLoader
-from meeting_assistant.services.embeddings import InMemoryEmbeddingIndex
+from meeting_assistant.services.embeddings import build_embedding_index
+from meeting_assistant.services.jobs import InProcessBatchJobQueue, SyncBatchJobQueue, build_batch_job_queue
 from meeting_assistant.services.normalizer import TranscriptNormalizer
 from meeting_assistant.services.orchestrator import BatchOrchestrator
 from meeting_assistant.services.planner import HeuristicPlanner, OpenAIPlanner, PlannerRouter
 from meeting_assistant.services.query import QueryService
-from meeting_assistant.services.queue import InMemoryTranscriptQueue
+from meeting_assistant.services.queue import build_transcript_queue
 from meeting_assistant.services.tools import ToolExecutor, ToolValidator
 
 
@@ -22,8 +23,13 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
     initialize_database()
 
     repository = Repository(SessionLocal)
-    queue = InMemoryTranscriptQueue()
-    embedding_index = InMemoryEmbeddingIndex()
+    queue = build_transcript_queue(queue_provider=settings.queue_provider, redis_url=settings.redis_url)
+    job_queue = build_batch_job_queue(
+        batch_processing_mode=settings.batch_processing_mode,
+        job_queue_provider=settings.job_queue_provider,
+        redis_url=settings.redis_url,
+    )
+    embedding_index = build_embedding_index(settings)
     asr_http_client = httpx.Client(timeout=settings.asr_openai_timeout_seconds)
     source_resolver = LocalAudioSourceResolver(asr_http_client)
     hosted_asr = OpenAIHostedASRClient(
@@ -75,7 +81,12 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         context_loader=context_loader,
         embedding_index=embedding_index,
         agent_runtime=agent_runtime,
+        job_queue=job_queue,
+        batch_processing_mode=settings.batch_processing_mode,
     )
+    if isinstance(job_queue, (SyncBatchJobQueue, InProcessBatchJobQueue)):
+        job_queue.bind(orchestrator.run_batch_workflow)
+
     query_service = QueryService(repository, embedding_index)
 
     return Container(

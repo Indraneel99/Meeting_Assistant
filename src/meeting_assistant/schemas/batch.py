@@ -32,3 +32,10 @@ class BatchMeetingResponse(BaseModel):
     tool_calls_recorded: int
     iterations_used: int
     tool_executions: list[ToolExecutionRecord] = Field(default_factory=list)
+
+
+class BatchJobAcceptedResponse(BaseModel):
+    job_id: int
+    workflow_run_id: int
+    meeting_id: int
+    status: str
