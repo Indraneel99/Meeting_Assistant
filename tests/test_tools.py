@@ -1,10 +1,11 @@
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from meeting_assistant.core.config import Settings
 from meeting_assistant.db.models import Base
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.planner import ToolCall
 from meeting_assistant.services.tools import ToolExecutor, build_tool_providers
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 
 def build_repository() -> Repository:

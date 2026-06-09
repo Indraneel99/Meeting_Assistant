@@ -4,7 +4,6 @@ import httpx
 
 from meeting_assistant.services.tools.base import RetryableToolError
 
-
 RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 
 
@@ -12,11 +11,6 @@ def raise_for_response(response: httpx.Response, *, provider: str) -> None:
     if response.is_success:
         return
     message = _extract_error_message(response)
-    details = {
-        "provider": provider,
-        "status_code": response.status_code,
-        "response": message,
-    }
     if response.status_code in RETRYABLE_STATUS_CODES:
         raise RetryableToolError(f"{provider} request failed with retryable status {response.status_code}: {message}")
     raise RuntimeError(f"{provider} request failed with status {response.status_code}: {message}")

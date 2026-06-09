@@ -8,6 +8,7 @@ from meeting_assistant.core.config import Settings
 from meeting_assistant.services.asr import (
     ASRError,
     ASRErrorCode,
+    AudioAsset,
     BatchASRAdapter,
     GcsAudioSourceResolver,
     LocalAudioSourceResolver,
@@ -16,7 +17,6 @@ from meeting_assistant.services.asr import (
     build_asr,
     map_http_error_to_asr_error,
     validate_audio_asset,
-    AudioAsset,
 )
 
 
@@ -133,7 +133,6 @@ def test_s3_audio_source_resolver_reads_object() -> None:
 
 
 def test_gcs_audio_source_resolver_reads_object() -> None:
-    storage_module = MagicMock()
     blob = MagicMock()
     blob.exists.return_value = True
     blob.download_as_bytes.return_value = b"gcs-audio"

@@ -34,10 +34,17 @@ uv sync --extra dev
 | Run tests | `uv run pytest` |
 | API docs | http://127.0.0.1:8000/docs |
 | Health check | `curl http://127.0.0.1:8000/health` |
+| Readiness check | `curl http://127.0.0.1:8000/ready` |
 
 ### Linting
 
-No linter (ruff/mypy/flake8) is configured in this repo. Use `uv run pytest` as the primary quality gate.
+```bash
+uv run ruff check src tests
+uv run mypy src/meeting_assistant
+uv run pytest
+```
+
+CI runs ruff, mypy, pytest (SQLite), and a Postgres migration smoke job on pull requests.
 
 ### Optional secrets
 

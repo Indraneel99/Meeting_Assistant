@@ -7,7 +7,7 @@ from typing import Protocol
 import httpx
 from openai import APIStatusError
 
-from meeting_assistant.schemas.planner import PlanResult, PlannedDecision, PlannedTask, ToolCall
+from meeting_assistant.schemas.planner import PlannedDecision, PlannedTask, PlanResult, ToolCall
 from meeting_assistant.services.context import ContextBundle
 
 # Use uvicorn's app logger so planner logs are visible in dev server output.

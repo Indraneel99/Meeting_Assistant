@@ -8,6 +8,9 @@ from meeting_assistant.db.models import Base
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.retrieval import QueryRequest
 from meeting_assistant.services.embeddings import InMemoryEmbeddingIndex
+from meeting_assistant.services.query import QueryService
+from meeting_assistant.services.query_answerer import HeuristicQueryAnswerer
+from meeting_assistant.services.retrieval_pagination import decode_cursor, encode_cursor, paginate_scored_results
 
 
 @dataclass
@@ -16,9 +19,6 @@ class FixedEmbedder:
 
     def embed(self, text: str) -> list[float]:
         return self.vector
-from meeting_assistant.services.query import QueryService
-from meeting_assistant.services.query_answerer import HeuristicQueryAnswerer, RetrievalContext
-from meeting_assistant.services.retrieval_pagination import decode_cursor, encode_cursor, paginate_scored_results
 
 
 def build_repository() -> Repository:

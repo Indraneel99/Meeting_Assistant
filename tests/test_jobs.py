@@ -86,7 +86,6 @@ def test_workflow_status_not_found() -> None:
 
 def test_run_batch_workflow_uses_existing_workflow_record() -> None:
     from meeting_assistant.bootstrap import bootstrap_container
-    from meeting_assistant.services.jobs import BatchJobQueue
 
     class CaptureOnlyQueue:
         def __init__(self) -> None:

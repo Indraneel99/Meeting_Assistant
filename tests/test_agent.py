@@ -1,15 +1,16 @@
 from dataclasses import dataclass
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from meeting_assistant.core.config import Settings
 from meeting_assistant.db.models import Base
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.planner import PlanResult
 from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.context import ContextBundle
 from meeting_assistant.services.planner import Planner, PlannerRuntimeState
-from meeting_assistant.core.config import Settings
 from meeting_assistant.services.tools import ToolExecutor, ToolValidator, build_tool_providers
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 
 def build_tool_executor(repository: Repository) -> ToolExecutor:

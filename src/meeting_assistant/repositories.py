@@ -27,7 +27,6 @@ from meeting_assistant.db.models import (
 )
 from meeting_assistant.services.asr import TranscriptDocument
 
-
 SessionFactory = Callable[[], Session]
 
 

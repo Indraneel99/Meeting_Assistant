@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from meeting_assistant.bootstrap import bootstrap_container
-from meeting_assistant.schemas.batch import BatchMeetingRequest
-
-
 from arq.connections import RedisSettings
 
+from meeting_assistant.bootstrap import bootstrap_container
 from meeting_assistant.core.config import Settings
+from meeting_assistant.schemas.batch import BatchMeetingRequest
 
 _settings = Settings()
 

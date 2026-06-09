@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Ruff
+        run: uv run ruff check src tests
+      - name: Mypy
+        run: uv run mypy src/meeting_assistant
+      - name: Pytest (SQLite)
+        run: uv run pytest
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: meeting
+          POSTGRES_PASSWORD: meeting
+          POSTGRES_DB: meeting_assistant
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U meeting -d meeting_assistant"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Apply migrations
+        env:
+          MEETING_ASSISTANT_DATABASE_URL: postgresql+psycopg://meeting:meeting@localhost:5432/meeting_assistant
+        run: uv run alembic upgrade head
+      - name: Pytest (Postgres)
+        env:
+          MEETING_ASSISTANT_DATABASE_URL: postgresql+psycopg://meeting:meeting@localhost:5432/meeting_assistant
+        run: uv run pytest tests/test_migrations.py tests/test_embeddings.py

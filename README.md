@@ -185,8 +185,44 @@ Retry backoff can run off the request thread when using async workers:
 export MEETING_ASSISTANT_TOOL_EXECUTION_BACKOFF_MODE="background"
 ```
 
+### Production hardening
+
+Auth is disabled by default for local development. Enable API key or JWT protection on `/api/v1/*` and `/admin/*`:
+
+```bash
+export MEETING_ASSISTANT_AUTH_ENABLED="true"
+export MEETING_ASSISTANT_AUTH_MODE="api_key"
+export MEETING_ASSISTANT_AUTH_API_KEYS="alice:your-secret-key,service-admin:admin-key"
+```
+
+Scoped keys use `user_external_id:api_key`. Keys without a prefix can access any user. JWT mode:
+
+```bash
+export MEETING_ASSISTANT_AUTH_MODE="jwt"
+export MEETING_ASSISTANT_AUTH_JWT_SECRET="your-32-byte-minimum-secret"
+```
+
+Operational endpoints:
+
+```bash
+curl http://127.0.0.1:8000/health   # liveness
+curl http://127.0.0.1:8000/ready    # database/redis/embedder readiness
+```
+
+Optional observability and rate limits:
+
+```bash
+export MEETING_ASSISTANT_LOG_JSON="true"
+export MEETING_ASSISTANT_OTEL_ENABLED="true"
+export MEETING_ASSISTANT_OTEL_EXPORTER_ENDPOINT="http://localhost:4318/v1/traces"
+export MEETING_ASSISTANT_RATE_LIMIT_ENABLED="true"
+```
+
 ## Test
 
 ```bash
+uv sync --extra dev
+uv run ruff check src tests
+uv run mypy src/meeting_assistant
 uv run pytest
 ```
