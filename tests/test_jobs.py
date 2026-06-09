@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from meeting_assistant.api.app import create_app
 from meeting_assistant.core.config import Settings
 from meeting_assistant.schemas.batch import BatchMeetingRequest
-from meeting_assistant.services.jobs import InProcessBatchJobQueue
 
 
 def build_async_settings() -> Settings:
