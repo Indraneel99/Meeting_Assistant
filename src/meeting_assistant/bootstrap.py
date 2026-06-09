@@ -1,4 +1,3 @@
-import httpx
 from openai import OpenAI
 
 from meeting_assistant.container import Container
@@ -6,7 +5,8 @@ from meeting_assistant.core.config import Settings
 from meeting_assistant.db.session import SessionLocal, initialize_database
 from meeting_assistant.repositories import Repository
 from meeting_assistant.services.agent import AgentRuntime
-from meeting_assistant.services.asr import BatchASRAdapter, LocalAudioSourceResolver, OpenAIHostedASRClient
+from meeting_assistant.services.asr import build_asr
+from meeting_assistant.services.audio_storage import build_audio_upload_store
 from meeting_assistant.services.context import ContextLoader
 from meeting_assistant.services.embeddings import build_embedding_index
 from meeting_assistant.services.jobs import InProcessBatchJobQueue, SyncBatchJobQueue, build_batch_job_queue
@@ -30,17 +30,8 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         redis_url=settings.redis_url,
     )
     embedding_index = build_embedding_index(settings)
-    asr_http_client = httpx.Client(timeout=settings.asr_openai_timeout_seconds)
-    source_resolver = LocalAudioSourceResolver(asr_http_client)
-    hosted_asr = OpenAIHostedASRClient(
-        api_key=settings.asr_openai_api_key,
-        base_url=settings.asr_openai_base_url,
-        model_name=settings.asr_openai_model,
-        language=settings.asr_openai_language,
-        chunking_strategy=settings.asr_openai_chunking_strategy,
-        http_client=asr_http_client,
-    )
-    asr = BatchASRAdapter(source_resolver=source_resolver, hosted_client=hosted_asr)
+    asr = build_asr(settings)
+    audio_upload_store = build_audio_upload_store(settings)
     normalizer = TranscriptNormalizer(settings.chunk_size_words)
     heuristic_planner = HeuristicPlanner()
     if settings.llm_provider == "openai" and settings.llm_openai_api_key:
@@ -95,4 +86,5 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         agent_runtime=agent_runtime,
         orchestrator=orchestrator,
         query_service=query_service,
+        audio_upload_store=audio_upload_store,
     )
