@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request
 
 from meeting_assistant.api.auth import assert_user_scope
 from meeting_assistant.api.deps import get_container, get_principal
-from meeting_assistant.api.rate_limit import limiter
+from meeting_assistant.api.rate_limit import limiter, query_rate_limit
 from meeting_assistant.container import Container
 from meeting_assistant.schemas.retrieval import (
     MeetingTasksResponse,
@@ -17,7 +17,7 @@ router = APIRouter(tags=["retrieval"])
 
 
 @router.post("/query", response_model=QueryResponse)
-@limiter.limit("30/minute")
+@limiter.limit(query_rate_limit)
 def answer_query(
     request: Request,
     payload: QueryRequest,

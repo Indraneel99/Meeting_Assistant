@@ -27,6 +27,16 @@ class PlannerRuntimeState:
     iteration: int
     max_iterations: int
     history: list[PlannerHistoryEntry] = field(default_factory=list)
+    available_tools: frozenset[str] | None = None
+
+
+def filter_tool_calls_by_availability(
+    tool_calls: list[ToolCall],
+    available_tools: frozenset[str] | None,
+) -> list[ToolCall]:
+    if available_tools is None:
+        return tool_calls
+    return [tool_call for tool_call in tool_calls if tool_call.tool_name in available_tools]
 
 
 class Planner(Protocol):
@@ -116,17 +126,22 @@ class HeuristicPlanner:
                         payload={"channel": "general", "body": sentence},
                     )
                 )
-            if "jira" in lowered or "ticket" in lowered:
-                tool_calls.append(
-                    ToolCall(
-                        tool_name="jira.create_issue",
-                        payload={"issue_summary": sentence, "issue_description": sentence},
-                    )
-                )
+            # Jira disabled — re-enable when tool-jira-live is active (see features.json).
+            # if "jira" in lowered or "ticket" in lowered:
+            #     tool_calls.append(
+            #         ToolCall(
+            #             tool_name="jira.create_issue",
+            #             payload={"issue_summary": sentence, "issue_description": sentence},
+            #         )
+            #     )
 
         if not tasks and sentences:
             tasks.append(PlannedTask(assignee="unassigned", action=f"Review outcomes from {title}"))
 
+        tool_calls = filter_tool_calls_by_availability(
+            tool_calls,
+            runtime_state.available_tools if runtime_state else None,
+        )
         return PlanResult(summary=summary, tasks=tasks[:10], decisions=decisions[:10], tool_calls=tool_calls[:10])
 
 
@@ -144,6 +159,12 @@ def build_planner_messages(
             f"- Iteration {item.iteration} [{item.step_kind}/{item.status}]: {item.detail}"
             for item in runtime_state.history
         )
+    available_tools_block = "All configured tools"
+    if runtime_state and runtime_state.available_tools is not None:
+        if runtime_state.available_tools:
+            available_tools_block = ", ".join(sorted(runtime_state.available_tools))
+        else:
+            available_tools_block = "None — user has not connected required integrations."
 
     system_prompt = (
         "You are a meeting assistant planner. "
@@ -157,15 +178,20 @@ def build_planner_messages(
         f"Recent meeting summaries:\n{recent_summaries}\n\n"
         f"Semantically relevant summaries:\n{relevant_summaries}\n\n"
         f"Execution history:\n{history_block}\n\n"
+        f"Available tools:\n{available_tools_block}\n\n"
         f"Transcript:\n{transcript_text}\n\n"
         "Guidance:\n"
         "- Keep the summary short and factual.\n"
         "- Extract concrete tasks with assignee when present, otherwise use 'unassigned'.\n"
         "- Extract important decisions with a clear topic.\n"
-        "- Only create tool calls when the meeting explicitly asks for an email, calendar, Slack, or Jira action.\n"
+        "- Only create tool calls when the meeting explicitly asks for an email, calendar, or Slack action.\n"
+        "- Only use tool names from the Available tools list above.\n"
         "- Do not repeat a tool call that already succeeded or is awaiting approval in the execution history.\n"
         "- If previous tool results already satisfy the request, return no tool calls.\n"
-        "- Use tool names email.send, calendar.create_event, slack.notify, and jira.create_issue.\n"
+        "- Use tool names email.send, calendar.create_event, and slack.notify.\n"
+        # Jira disabled — re-enable when tool-jira-live is active (see features.json).
+        # "- When action items imply follow-up tracking or engineering work, include jira.create_issue.\n"
+        # "- Use tool names email.send, calendar.create_event, slack.notify, and jira.create_issue.\n"
         "- Tool payloads must include subject, body, title, details, target, recipient, channel, "
         "issue_summary, issue_description, issue_type, and simulate_retryable_failure. "
         "Use empty strings for irrelevant payload fields.\n"
@@ -200,7 +226,14 @@ class OpenAIPlanner:
         )
         if response.output_parsed is None:
             raise ValueError("OpenAI planner returned no parsed output.")
-        return response.output_parsed
+        parsed = response.output_parsed
+        filtered_tool_calls = filter_tool_calls_by_availability(
+            parsed.tool_calls,
+            runtime_state.available_tools if runtime_state else None,
+        )
+        if filtered_tool_calls == parsed.tool_calls:
+            return parsed
+        return parsed.model_copy(update={"tool_calls": filtered_tool_calls})
 
 
 @dataclass(slots=True)

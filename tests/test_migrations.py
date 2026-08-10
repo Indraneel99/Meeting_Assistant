@@ -22,5 +22,6 @@ def test_alembic_upgrade_creates_initial_schema(tmp_path: Path) -> None:
         "tool_executions",
         "agent_steps",
         "approval_requests",
+        "user_integrations",
     }.issubset(table_names)
     assert "iteration_count" in {column["name"] for column in inspector.get_columns("workflow_runs")}

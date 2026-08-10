@@ -1,0 +1,87 @@
+# Production-shaped local stack: Postgres (pgvector) + Redis + API + ARQ worker.
+#   cp .env.compose.example .env.compose
+#   docker compose up --build
+# Or: make compose-up
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: meeting_assistant
+      POSTGRES_PASSWORD: meeting_assistant
+      POSTGRES_DB: meeting_assistant
+    ports:
+      - "${COMPOSE_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meeting_assistant -d meeting_assistant"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${COMPOSE_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build: .
+    ports:
+      - "${COMPOSE_API_PORT:-8000}:8080"
+    env_file:
+      - .env.compose
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  worker:
+    build: .
+    command: ["/app/scripts/cloudrun_worker_entrypoint.sh"]
+    env_file:
+      - .env.compose
+    environment:
+      MEETING_ASSISTANT_OTEL_SERVICE_NAME: meeting-assistant-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    ports:
+      - "${COMPOSE_WORKER_PORT:-8081}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+volumes:
+  postgres_data:

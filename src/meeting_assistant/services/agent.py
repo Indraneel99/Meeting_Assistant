@@ -9,6 +9,7 @@ from meeting_assistant.schemas.planner import PlannedDecision, PlannedTask, Plan
 from meeting_assistant.services.context import ContextBundle
 from meeting_assistant.services.planner import Planner, PlannerHistoryEntry, PlannerRuntimeState
 from meeting_assistant.services.tools import ToolExecutionOutcome, ToolExecutor, ToolValidator
+from meeting_assistant.services.tools.user_factory import UserToolProviderFactory
 
 
 def _task_key(task: PlannedTask) -> tuple[str, str]:
@@ -36,6 +37,7 @@ class AgentRuntime:
     tool_validator: ToolValidator
     tool_executor: ToolExecutor
     max_iterations: int = 10
+    user_tool_factory: UserToolProviderFactory | None = None
 
     def run(
         self,
@@ -121,6 +123,7 @@ class AgentRuntime:
                 iteration=iteration,
                 max_iterations=self.max_iterations,
                 history=list(history),
+                available_tools=self._available_tools_for_workflow(workflow_run_id),
             )
             plan = self.planner.plan(title, transcript_text, context, runtime_state)
             self._record_planner_step(workflow_run_id, iteration, plan)
@@ -210,6 +213,14 @@ class AgentRuntime:
             tool_executions=tool_execution_records,
             iterations_used=iterations_used,
         )
+
+    def _available_tools_for_workflow(self, workflow_run_id: int) -> frozenset[str] | None:
+        if self.user_tool_factory is None:
+            return None
+        user_id = self.repository.get_user_id_for_workflow(workflow_run_id)
+        if user_id is None:
+            return frozenset()
+        return self.user_tool_factory.available_tools(user_id)
 
     def _history_from_steps(self, steps: list) -> list[PlannerHistoryEntry]:
         history: list[PlannerHistoryEntry] = []

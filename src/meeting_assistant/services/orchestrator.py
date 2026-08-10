@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from meeting_assistant.core.telemetry import pop_trace_context, trace_batch_workflow
 from meeting_assistant.db.models import WorkflowStatus
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.batch import BatchMeetingRequest, BatchMeetingResponse
@@ -49,10 +50,20 @@ class BatchOrchestrator:
         payload: BatchMeetingRequest | dict[str, Any] | None = None,
     ) -> dict[str, object]:
         if isinstance(payload, dict):
-            payload = BatchMeetingRequest.model_validate(payload)
+            normalized_payload = dict(payload)
+            pop_trace_context(normalized_payload)
+            payload = BatchMeetingRequest.model_validate(normalized_payload)
         if payload is None:
             raise ValueError("Batch meeting payload is required.")
 
+        with trace_batch_workflow(workflow_run_id):
+            return self._run_batch_workflow(workflow_run_id, payload)
+
+    def _run_batch_workflow(
+        self,
+        workflow_run_id: int | None,
+        payload: BatchMeetingRequest,
+    ) -> dict[str, object]:
         workflow_run = None
         meeting = None
         user = None
@@ -187,22 +198,23 @@ class BatchOrchestrator:
         decisions_logged: int | None = None
         tool_calls_recorded: int | None = None
 
+        executions = self.repository.list_tool_executions(workflow_run_id)
+        tool_executions = [
+            WorkflowToolExecutionRecord(
+                tool_name=execution.tool_name,
+                status=execution.status.value,
+                attempts=self.repository.count_tool_execution_attempts(execution.id),
+                idempotency_key=execution.idempotency_key,
+                result=json.loads(execution.result) if execution.result else None,
+            )
+            for execution in executions
+        ]
+
         if workflow_run.status in {
             WorkflowStatus.DONE,
             WorkflowStatus.AWAITING_APPROVAL,
             WorkflowStatus.FAILED,
         }:
-            executions = self.repository.list_tool_executions(workflow_run_id)
-            tool_executions = [
-                WorkflowToolExecutionRecord(
-                    tool_name=execution.tool_name,
-                    status=execution.status.value,
-                    attempts=self.repository.count_tool_execution_attempts(execution.id),
-                    idempotency_key=execution.idempotency_key,
-                    result=json.loads(execution.result) if execution.result else None,
-                )
-                for execution in executions
-            ]
             tasks_created = len(self.repository.get_tasks_for_meeting(meeting.id))
             decisions_logged = len(
                 [decision for decision in self.repository.get_decisions_for_user(meeting.user_id) if decision.meeting_id == meeting.id]

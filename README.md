@@ -24,6 +24,22 @@ The current implementation is a modular monolith:
 
 The storage model is compatible with a future Postgres + pgvector deployment. Local development defaults to SQLite, while the vector layer is abstracted so a real pgvector-backed implementation can replace the in-process cosine similarity store.
 
+## User integrations (Phase 13 — planned)
+
+v1 uses **deploy-level** tool credentials (one Slack webhook, SendGrid sender, Google service account for the whole deployment). The multi-user product moves to **per-user connections** with **Meeting Assistant app identity** for outbound actions:
+
+| Channel | User connects | Messages appear as |
+|---------|---------------|-------------------|
+| Slack | Workspace OAuth + channel picker | **Meeting Assistant** bot (not the user) |
+| Email | Notification email preferences | **Meeting Assistant** branded sender via SendGrid |
+| Calendar | Optional Google read; writes via assistant calendar | Invite from **Meeting Assistant** calendar |
+
+Users authorize the app; the app acts with its own visible identity (similar to GitHub Apps / Cursor bot commits). See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15 and [`features.json`](./features.json) Phase 13 features.
+
+## Frontend
+
+A Vite + React app lives in [`frontend/`](./frontend/). Run the API on port 8000, then `cd frontend && npm run dev` for port 5173. Planned: **Settings → Integrations** for connect/disconnect flows.
+
 ## Run locally
 
 ```bash
@@ -70,6 +86,18 @@ export MEETING_ASSISTANT_QUEUE_PROVIDER="redis"
 export MEETING_ASSISTANT_REDIS_URL="redis://localhost:6379/0"
 uv run arq meeting_assistant.worker.WorkerSettings
 ```
+
+### Docker Compose (Postgres + Redis + API + worker)
+
+Production-shaped local stack without GCP:
+
+```bash
+cp .env.compose.example .env.compose
+make compose-up
+make compose-smoke   # /health + /ready on :8000, worker :8081
+```
+
+API docs: http://127.0.0.1:8000/docs. Stop with `make compose-down`.
 
 Poll workflow status with `GET /api/v1/workflows/{workflow_run_id}`.
 
@@ -143,31 +171,35 @@ export MEETING_ASSISTANT_LLM_PROVIDER="openai"
 
 If no LLM API key is configured, the app falls back to the local heuristic planner so you can keep testing offline.
 
-Tool providers default to local stubs for offline development. Configure real integrations per tool:
+Tool providers default to local stubs for offline development. **v1:** configure one set of credentials per deployment via env vars. **Phase 13:** per-user integrations replace deploy-level Slack/webhook routing; email uses deploy SendGrid with per-user recipient prefs.
 
 ```bash
-# Email via SendGrid
+# --- v1 deploy-level (single-tenant GCP today) ---
+
+# Email via SendGrid (Meeting Assistant branded sender)
 export MEETING_ASSISTANT_EMAIL_PROVIDER="sendgrid"
 export MEETING_ASSISTANT_EMAIL_SENDGRID_API_KEY="..."
-export MEETING_ASSISTANT_EMAIL_FROM_ADDRESS="noreply@yourdomain.com"
+export MEETING_ASSISTANT_EMAIL_FROM_ADDRESS="Meeting Assistant <notifications@yourdomain.com>"
 export MEETING_ASSISTANT_EMAIL_DEFAULT_RECIPIENT="team@yourdomain.com"
 
-# Calendar via Google service account (requires: uv sync --extra tools)
+# Calendar via Google service account (Phase 13: assistant-owned organizer calendar)
 export MEETING_ASSISTANT_CALENDAR_PROVIDER="google"
 export MEETING_ASSISTANT_CALENDAR_GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
 export MEETING_ASSISTANT_CALENDAR_GOOGLE_CALENDAR_ID="primary"
 
-# Slack via incoming webhook or bot token
+# Slack via bot or webhook (Phase 13: per-user workspace OAuth, bot posts as Meeting Assistant)
 export MEETING_ASSISTANT_SLACK_PROVIDER="webhook"
 export MEETING_ASSISTANT_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
 
-# Jira REST API
+# Jira REST API (deferred)
 export MEETING_ASSISTANT_JIRA_PROVIDER="rest"
 export MEETING_ASSISTANT_JIRA_BASE_URL="https://your-org.atlassian.net"
 export MEETING_ASSISTANT_JIRA_USER_EMAIL="bot@yourdomain.com"
 export MEETING_ASSISTANT_JIRA_API_TOKEN="..."
 export MEETING_ASSISTANT_JIRA_PROJECT_KEY="ENG"
 ```
+
+Phase 13 OAuth app credentials (Slack client_id/secret, Google OAuth client) will be documented in `.env.production.example` when implemented. See `ARCHITECTURE.md` for the integrations API surface.
 
 Retrieval uses semantic search across meeting summaries, transcript chunks, and decisions. `/query` synthesizes answers with citations from retrieved context. Enable hosted Q&A with:
 

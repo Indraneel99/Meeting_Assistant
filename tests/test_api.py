@@ -12,6 +12,19 @@ def test_healthcheck() -> None:
         assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_configured_frontend_origin() -> None:
+    with TestClient(create_app()) as client:
+        response = client.options(
+            "/api/v1/meetings/batch",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
 def test_batch_ingestion_and_retrieval() -> None:
     user_external_id = f"user-{uuid4()}"
     user_email = f"{uuid4()}@example.com"

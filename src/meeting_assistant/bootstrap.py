@@ -5,11 +5,13 @@ from meeting_assistant.core.config import Settings
 from meeting_assistant.db.session import SessionLocal, initialize_database
 from meeting_assistant.repositories import Repository
 from meeting_assistant.services.agent import AgentRuntime
+from meeting_assistant.services.approval_lock import build_approval_lock
 from meeting_assistant.services.approvals import ApprovalService
 from meeting_assistant.services.asr import build_asr
 from meeting_assistant.services.audio_storage import build_audio_upload_store
 from meeting_assistant.services.context import ContextLoader
 from meeting_assistant.services.embeddings import build_embedding_index
+from meeting_assistant.services.integrations import build_integration_service
 from meeting_assistant.services.jobs import InProcessBatchJobQueue, SyncBatchJobQueue, build_batch_job_queue
 from meeting_assistant.services.normalizer import TranscriptNormalizer
 from meeting_assistant.services.orchestrator import BatchOrchestrator
@@ -18,6 +20,8 @@ from meeting_assistant.services.query import QueryService
 from meeting_assistant.services.query_answerer import build_query_answerer
 from meeting_assistant.services.queue import build_transcript_queue
 from meeting_assistant.services.tools import ToolExecutor, ToolValidator, build_sleep_fn, build_tool_providers
+from meeting_assistant.services.tools.factory import build_tool_http_client
+from meeting_assistant.services.tools.user_factory import build_user_tool_provider_factory
 
 
 def bootstrap_container(settings: Settings | None = None) -> Container:
@@ -54,9 +58,12 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         planner = heuristic_planner
     context_loader = ContextLoader(repository, embedding_index)
     tool_validator = ToolValidator()
+    tool_http_client = build_tool_http_client(settings)
+    user_tool_factory = build_user_tool_provider_factory(repository, settings, http_client=tool_http_client)
     tool_executor = ToolExecutor(
         repository,
         providers=build_tool_providers(settings),
+        user_tool_factory=user_tool_factory,
         max_retries=settings.tool_execution_max_retries,
         backoff_seconds=settings.tool_execution_backoff_seconds,
         sleep_fn=build_sleep_fn(settings),
@@ -67,6 +74,7 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         tool_validator=tool_validator,
         tool_executor=tool_executor,
         max_iterations=settings.max_tool_calls_per_session,
+        user_tool_factory=user_tool_factory,
     )
 
     orchestrator = BatchOrchestrator(
@@ -96,7 +104,9 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         agent_runtime=agent_runtime,
         context_loader=context_loader,
         embedding_index=embedding_index,
+        approval_lock=build_approval_lock(settings),
     )
+    integration_service = build_integration_service(repository, settings)
 
     return Container(
         settings=settings,
@@ -106,4 +116,5 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         query_service=query_service,
         audio_upload_store=audio_upload_store,
         approval_service=approval_service,
+        integration_service=integration_service,
     )

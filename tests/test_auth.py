@@ -62,3 +62,17 @@ def test_jwt_auth_scopes_user_external_id() -> None:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
+
+
+def test_health_and_ready_remain_public_when_auth_enabled() -> None:
+    settings = Settings(
+        auth_enabled=True,
+        auth_mode="api_key",
+        auth_api_keys="alice:test-secret",
+        readiness_check_redis=False,
+        readiness_check_embedder=False,
+    )
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 200
+        assert client.post("/api/v1/meetings/batch", json=_batch_payload("alice")).status_code == 401

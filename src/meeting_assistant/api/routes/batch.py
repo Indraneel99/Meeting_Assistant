@@ -3,7 +3,7 @@ from pydantic import EmailStr
 
 from meeting_assistant.api.auth import assert_user_scope
 from meeting_assistant.api.deps import get_container, get_principal
-from meeting_assistant.api.rate_limit import limiter
+from meeting_assistant.api.rate_limit import batch_rate_limit, limiter
 from meeting_assistant.container import Container
 from meeting_assistant.schemas.batch import BatchJobAcceptedResponse, BatchMeetingRequest, BatchMeetingResponse
 from meeting_assistant.services.asr import ASRError
@@ -32,7 +32,7 @@ def _submit_batch(
 
 
 @router.post("/meetings/batch", response_model=BatchMeetingResponse | BatchJobAcceptedResponse)
-@limiter.limit("10/minute")
+@limiter.limit(batch_rate_limit)
 def ingest_batch_meeting(
     request: Request,
     payload: BatchMeetingRequest,
@@ -44,7 +44,7 @@ def ingest_batch_meeting(
 
 
 @router.post("/meetings/batch/upload", response_model=BatchMeetingResponse | BatchJobAcceptedResponse)
-@limiter.limit("10/minute")
+@limiter.limit(batch_rate_limit)
 async def ingest_batch_meeting_upload(
     request: Request,
     response: Response,

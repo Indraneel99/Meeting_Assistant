@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Protocol
 
-import redis
+from meeting_assistant.services.redis_client import redis_from_url
 
 
 class TranscriptQueue(Protocol):
@@ -75,7 +75,7 @@ class InMemoryTranscriptQueue:
 
 class RedisTranscriptQueue:
     def __init__(self, redis_url: str) -> None:
-        self._redis = redis.Redis.from_url(redis_url, decode_responses=True)
+        self._redis = redis_from_url(redis_url, decode_responses=True)
 
     def publish(self, meeting_id: int, chunks: list[str]) -> None:
         if chunks:

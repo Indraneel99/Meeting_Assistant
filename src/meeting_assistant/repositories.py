@@ -13,6 +13,8 @@ from meeting_assistant.db.models import (
     ApprovalRequest,
     ApprovalRequestStatus,
     Decision,
+    IntegrationProvider,
+    IntegrationStatus,
     Meeting,
     MeetingChunk,
     TaskItem,
@@ -22,12 +24,37 @@ from meeting_assistant.db.models import (
     TranscriptArtifact,
     TranscriptSegment,
     User,
+    UserIntegration,
     WorkflowRun,
     WorkflowStatus,
 )
 from meeting_assistant.services.asr import TranscriptDocument
+from meeting_assistant.services.token_encryption import TokenEncryptor
 
 SessionFactory = Callable[[], Session]
+
+
+@dataclass(frozen=True, slots=True)
+class StaleWorkflowRow:
+    workflow_run_id: int
+    meeting_id: int
+    user_external_id: str | None
+    status: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FailedToolRow:
+    tool_execution_id: int
+    workflow_run_id: int
+    meeting_id: int
+    user_external_id: str | None
+    tool_name: str
+    status: str
+    result: str | None
+    attempt_count: int
+    error_message: str | None
+    last_attempt_at: datetime | None
 
 
 @dataclass(slots=True)
@@ -188,6 +215,27 @@ class Repository:
     def get_workflow_run(self, workflow_run_id: int) -> WorkflowRun | None:
         with self.session_factory() as session:
             return session.get(WorkflowRun, workflow_run_id)
+
+    def get_user_external_id_for_workflow(self, workflow_run_id: int) -> str | None:
+        with self.session_factory() as session:
+            statement = (
+                select(User.external_id)
+                .join(Meeting, Meeting.user_id == User.id)
+                .join(WorkflowRun, WorkflowRun.meeting_id == Meeting.id)
+                .where(WorkflowRun.id == workflow_run_id)
+            )
+            return session.scalar(statement)
+
+    def get_user_external_id_for_approval(self, approval_request_id: int) -> str | None:
+        with self.session_factory() as session:
+            statement = (
+                select(User.external_id)
+                .join(Meeting, Meeting.user_id == User.id)
+                .join(WorkflowRun, WorkflowRun.meeting_id == Meeting.id)
+                .join(ApprovalRequest, ApprovalRequest.workflow_run_id == WorkflowRun.id)
+                .where(ApprovalRequest.id == approval_request_id)
+            )
+            return session.scalar(statement)
 
     def get_user_by_id(self, user_id: int) -> User | None:
         with self.session_factory() as session:
@@ -613,3 +661,256 @@ class Repository:
                 last = page[-1]
                 next_cursor = encode_cursor(float(last["score"]), int(last["meeting_id"]))
             return page, next_cursor, has_more
+
+    def upsert_user_integration(
+        self,
+        *,
+        encryptor: TokenEncryptor,
+        user_id: int,
+        provider: IntegrationProvider,
+        provider_account_id: str = "",
+        status: IntegrationStatus = IntegrationStatus.CONNECTED,
+        scopes: str | None = None,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        expires_at: datetime | None = None,
+        settings_json: dict[str, object] | None = None,
+    ) -> UserIntegration:
+        with self.session_factory() as session:
+            integration = session.scalar(
+                select(UserIntegration).where(
+                    UserIntegration.user_id == user_id,
+                    UserIntegration.provider == provider,
+                    UserIntegration.provider_account_id == provider_account_id,
+                )
+            )
+            now = datetime.now(UTC)
+            if integration is None:
+                integration = UserIntegration(
+                    user_id=user_id,
+                    provider=provider,
+                    provider_account_id=provider_account_id,
+                    connected_at=now,
+                )
+                session.add(integration)
+
+            integration.status = status
+            integration.scopes = scopes
+            if access_token is not None:
+                integration.access_token_enc = encryptor.encrypt(access_token)
+            if refresh_token is not None:
+                integration.refresh_token_enc = encryptor.encrypt(refresh_token)
+            integration.expires_at = expires_at
+            if settings_json is not None:
+                integration.settings_json = settings_json
+            integration.updated_at = now
+            session.commit()
+            session.refresh(integration)
+            return integration
+
+    def get_user_integration(
+        self,
+        user_id: int,
+        provider: IntegrationProvider,
+        *,
+        provider_account_id: str = "",
+    ) -> UserIntegration | None:
+        with self.session_factory() as session:
+            return session.scalar(
+                select(UserIntegration).where(
+                    UserIntegration.user_id == user_id,
+                    UserIntegration.provider == provider,
+                    UserIntegration.provider_account_id == provider_account_id,
+                )
+            )
+
+    def list_user_integrations(self, user_id: int) -> list[UserIntegration]:
+        with self.session_factory() as session:
+            return list(
+                session.scalars(
+                    select(UserIntegration)
+                    .where(UserIntegration.user_id == user_id)
+                    .order_by(UserIntegration.provider, UserIntegration.provider_account_id)
+                )
+            )
+
+    def update_user_integration_settings(
+        self,
+        user_id: int,
+        provider: IntegrationProvider,
+        settings_json: dict[str, object],
+        *,
+        provider_account_id: str = "",
+    ) -> UserIntegration:
+        with self.session_factory() as session:
+            integration = session.scalar(
+                select(UserIntegration).where(
+                    UserIntegration.user_id == user_id,
+                    UserIntegration.provider == provider,
+                    UserIntegration.provider_account_id == provider_account_id,
+                )
+            )
+            if integration is None:
+                raise ValueError(
+                    f"Integration {provider.value} not found for user {user_id} "
+                    f"(account {provider_account_id!r})"
+                )
+            integration.settings_json = settings_json
+            integration.updated_at = datetime.now(UTC)
+            session.commit()
+            session.refresh(integration)
+            return integration
+
+    def revoke_user_integration(
+        self,
+        user_id: int,
+        provider: IntegrationProvider,
+        *,
+        provider_account_id: str = "",
+    ) -> UserIntegration:
+        with self.session_factory() as session:
+            integration = session.scalar(
+                select(UserIntegration).where(
+                    UserIntegration.user_id == user_id,
+                    UserIntegration.provider == provider,
+                    UserIntegration.provider_account_id == provider_account_id,
+                )
+            )
+            if integration is None:
+                raise ValueError(
+                    f"Integration {provider.value} not found for user {user_id} "
+                    f"(account {provider_account_id!r})"
+                )
+            integration.status = IntegrationStatus.REVOKED
+            integration.access_token_enc = None
+            integration.refresh_token_enc = None
+            integration.expires_at = None
+            integration.updated_at = datetime.now(UTC)
+            session.commit()
+            session.refresh(integration)
+            return integration
+
+    def get_user_id_for_workflow(self, workflow_run_id: int) -> int | None:
+        with self.session_factory() as session:
+            return session.scalar(
+                select(Meeting.user_id)
+                .join(WorkflowRun, WorkflowRun.meeting_id == Meeting.id)
+                .where(WorkflowRun.id == workflow_run_id)
+            )
+
+    def get_connected_integration(
+        self,
+        user_id: int,
+        provider: IntegrationProvider,
+    ) -> UserIntegration | None:
+        with self.session_factory() as session:
+            return session.scalar(
+                select(UserIntegration)
+                .where(
+                    UserIntegration.user_id == user_id,
+                    UserIntegration.provider == provider,
+                    UserIntegration.status == IntegrationStatus.CONNECTED,
+                )
+                .order_by(UserIntegration.connected_at.desc())
+            )
+
+    def decrypt_integration_tokens(
+        self,
+        integration: UserIntegration,
+        *,
+        encryptor: TokenEncryptor,
+    ) -> tuple[str | None, str | None]:
+        return (
+            encryptor.decrypt(integration.access_token_enc),
+            encryptor.decrypt(integration.refresh_token_enc),
+        )
+
+    def list_stale_pending_workflows(
+        self,
+        *,
+        older_than: datetime,
+        limit: int = 100,
+    ) -> list[StaleWorkflowRow]:
+        with self.session_factory() as session:
+            rows = session.execute(
+                select(
+                    WorkflowRun.id,
+                    WorkflowRun.meeting_id,
+                    User.external_id,
+                    WorkflowRun.status,
+                    WorkflowRun.created_at,
+                )
+                .join(Meeting, Meeting.id == WorkflowRun.meeting_id)
+                .join(User, User.id == Meeting.user_id)
+                .where(
+                    WorkflowRun.status == WorkflowStatus.PENDING,
+                    WorkflowRun.created_at <= older_than,
+                )
+                .order_by(WorkflowRun.created_at.asc())
+                .limit(limit)
+            ).all()
+            return [
+                StaleWorkflowRow(
+                    workflow_run_id=row[0],
+                    meeting_id=row[1],
+                    user_external_id=row[2],
+                    status=row[3].value if hasattr(row[3], "value") else str(row[3]),
+                    created_at=row[4],
+                )
+                for row in rows
+            ]
+
+    def list_failed_tool_executions(
+        self,
+        *,
+        since: datetime,
+        limit: int = 100,
+    ) -> list[FailedToolRow]:
+        attempt_stats = (
+            select(
+                ToolExecutionAttempt.tool_execution_id.label("tool_execution_id"),
+                func.count(ToolExecutionAttempt.id).label("attempt_count"),
+                func.max(ToolExecutionAttempt.created_at).label("last_attempt_at"),
+            )
+            .group_by(ToolExecutionAttempt.tool_execution_id)
+            .subquery()
+        )
+        with self.session_factory() as session:
+            rows = session.execute(
+                select(
+                    ToolExecution.id,
+                    ToolExecution.workflow_run_id,
+                    Meeting.id,
+                    User.external_id,
+                    ToolExecution.tool_name,
+                    ToolExecution.status,
+                    ToolExecution.result,
+                    attempt_stats.c.attempt_count,
+                    attempt_stats.c.last_attempt_at,
+                )
+                .join(WorkflowRun, WorkflowRun.id == ToolExecution.workflow_run_id)
+                .join(Meeting, Meeting.id == WorkflowRun.meeting_id)
+                .join(User, User.id == Meeting.user_id)
+                .join(attempt_stats, attempt_stats.c.tool_execution_id == ToolExecution.id)
+                .where(
+                    ToolExecution.status == ToolExecutionStatus.FAILED,
+                    attempt_stats.c.last_attempt_at >= since,
+                )
+                .order_by(attempt_stats.c.last_attempt_at.desc())
+                .limit(limit)
+            ).all()
+            return [
+                FailedToolRow(
+                    tool_execution_id=row[0],
+                    workflow_run_id=row[1],
+                    meeting_id=row[2],
+                    user_external_id=row[3],
+                    tool_name=row[4],
+                    status=row[5].value if hasattr(row[5], "value") else str(row[5]),
+                    result=row[6],
+                    attempt_count=int(row[7]),
+                    error_message=None,
+                    last_attempt_at=row[8],
+                )
+                for row in rows
+            ]

@@ -4,7 +4,9 @@
 
 ### Product overview
 
-Single-service Python **Meeting Assistant** API (modular monolith). No frontend, Docker Compose, or external databases required for local development. Default stack: SQLite + in-process queue/embeddings + heuristic planner.
+Single-service Python **Meeting Assistant** API (modular monolith) plus a **Vite+React frontend** in `frontend/`. Default dev stack: SQLite + in-process queue/embeddings + heuristic planner + stub tools.
+
+**Phase 13 (planned):** Per-user integrations — users connect Slack workspace, email notification prefs, and calendar via OAuth/settings UI. Outbound actions use **Meeting Assistant app identity** (Slack bot, branded email, assistant calendar), not user impersonation. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15/16 and [`features.json`](./features.json) `integrations-*` features.
 
 ### Services
 
@@ -31,7 +33,9 @@ uv sync --extra dev
 |------|---------|
 | Install deps | `uv sync --extra dev` |
 | Run server | `uv run uvicorn meeting_assistant.main:app --reload` |
+| Run frontend | `cd frontend && npm install && npm run dev` |
 | Run tests | `uv run pytest` |
+| Docker Compose stack | `cp .env.compose.example .env.compose && make compose-up` |
 | API docs | http://127.0.0.1:8000/docs |
 | Health check | `curl http://127.0.0.1:8000/health` |
 | Readiness check | `curl http://127.0.0.1:8000/ready` |
@@ -57,7 +61,57 @@ Not required for core E2E flows (transcript text + heuristic planner):
 
 After starting the server, POST a batch meeting with `transcript_text` to `/api/v1/meetings/batch`, then hit search/tasks/decisions/query endpoints. See `tests/test_api.py::test_batch_ingestion_and_retrieval` for the canonical flow.
 
+### Production auth (GCP)
+
+When `AUTH_ENABLED=true` (set in `deploy/.env.prod`):
+
+- `/health` and `/ready` remain **public** (no key required).
+- All `/api/v1/*` and `/admin/*` routes require **`X-API-Key`** header.
+- Secret Manager secret `meeting-assistant-api-keys` format: `user_external_id:api_key`  
+  Example: `indra:your-postman-secret` (scoped to `user_external_id=indra` in batch requests).
+
+Postman example:
+
+```bash
+curl -H "X-API-Key: your-postman-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"user_external_id":"indra",...}' \
+  https://your-api.run.app/api/v1/meetings/batch
+```
+
+Create/update the secret:
+
+```bash
+echo -n 'indra:your-postman-secret' | gcloud secrets versions add meeting-assistant-api-keys --data-file=-
+```
+
 ### Notes
 
 - SQLite DB file defaults to `./meeting_assistant.db` (auto-created on startup).
 - Calendar tool actions return `approval_required`; email tool executes in stub mode — both are expected.
+
+### Feature development
+
+Track work in [`features.json`](./features.json) (`pass` / `not_started`) and read [`progress.md`](./progress.md) for roadmap context.
+
+**One feature at a time.** Before starting implementation, pick exactly one feature with `"status": "not_started"` from `features.json`. Do not begin another feature until the current one is fully done or you explicitly hand off with it still incomplete. If the user's request spans multiple features, finish the first before moving on.
+
+**Exit criteria — all checks must pass.** A feature is not complete until every step below succeeds. Do not mark the feature `pass` or stop working on it early.
+
+1. Implement the feature (code, config, tests as needed).
+2. Run the full quality gate and fix failures until clean:
+
+```bash
+uv run ruff check src tests
+uv run mypy src/meeting_assistant
+uv run pytest
+```
+
+3. For integrations that need live verification (e.g. Slack on GCP), run the manual check described in the feature's `description` and confirm it works.
+4. Only then update `features.json` for that feature:
+   - Set `"status": "pass"`
+   - Set `"evidence"` — what was verified (tests, commands, live check)
+   - Set `"testedAt"` — today's date (`YYYY-MM-DD`)
+5. Update [`progress.md`](./progress.md) if the milestone is significant.
+
+If any test or lint step fails, keep working on the same feature until they all pass. Never set `"status": "pass"` on failing tests.

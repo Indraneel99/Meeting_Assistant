@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker
 
-from meeting_assistant.db.models import Base
+from meeting_assistant.db.models import Base, Meeting
 from meeting_assistant.repositories import Repository
 from meeting_assistant.services.embeddings import (
     EmbeddingRouter,
@@ -58,6 +59,13 @@ def build_repository() -> Repository:
     Base.metadata.create_all(bind=engine)
     session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     return Repository(session_local)
+
+
+def test_embedding_vector_compiles_cosine_distance_for_postgres() -> None:
+    distance = Meeting.summary_embedding.cosine_distance([0.0] * 1536)
+    compiled = select(Meeting.id, distance).compile(dialect=postgresql.dialect())
+
+    assert "<=>" in str(compiled)
 
 
 def test_inmemory_search_uses_persisted_embedding() -> None:

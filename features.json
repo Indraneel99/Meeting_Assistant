@@ -1,0 +1,482 @@
+{
+  "project": "meeting-assistant",
+  "description": "Modular monolith Meeting Assistant — batch ingest, agent tools, semantic retrieval, GCP-deployed API",
+  "features": [
+    {
+      "id": "health-liveness",
+      "name": "Health Liveness",
+      "description": "GET /health returns 200 without dependency checks for load balancer probes",
+      "status": "pass",
+      "evidence": "test_readiness.py and test_api.py; verified on GCP Cloud Run",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "readiness-check",
+      "name": "Readiness Check",
+      "description": "GET /ready validates database connectivity and optional Redis/embedder; returns 503 when degraded",
+      "status": "pass",
+      "evidence": "test_readiness.py; Postgres + Redis ping on GCP deploy",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "database-postgres",
+      "name": "PostgreSQL + Migrations",
+      "description": "Alembic migrations 0001–0004, Cloud SQL Postgres with pgvector extension for production",
+      "status": "pass",
+      "evidence": "test_migrations.py; CI Postgres smoke; GCP Cloud SQL with auto-upgrade on startup",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "database-sqlite-dev",
+      "name": "SQLite Dev Database",
+      "description": "Zero-infra local dev with SQLite file and JSON-stored embedding vectors",
+      "status": "pass",
+      "evidence": "Default ./meeting_assistant.db; full pytest suite on SQLite in CI",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "batch-ingest-sync",
+      "name": "Batch Ingestion (Sync)",
+      "description": "POST /api/v1/meetings/batch with transcript_text runs full pipeline inline and returns 200",
+      "status": "pass",
+      "evidence": "test_api.py::test_batch_ingestion_and_retrieval; local and sync-mode tests",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "batch-ingest-async",
+      "name": "Batch Ingestion (Async)",
+      "description": "POST /api/v1/meetings/batch returns 202 with workflow_run_id; ARQ worker executes run_batch_workflow",
+      "status": "pass",
+      "evidence": "test_jobs.py; GCP Cloud Run API + worker with BATCH_PROCESSING_MODE=async; Postman verified",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "batch-upload-audio",
+      "name": "Audio Upload Endpoint",
+      "description": "POST /api/v1/meetings/batch/upload accepts multipart audio, stores to local/S3/GCS, runs ASR pipeline",
+      "status": "pass",
+      "evidence": "test_batch_upload.py; test_audio_storage.py; GCS backend configured on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "asr-openai",
+      "name": "OpenAI ASR",
+      "description": "ASRAdapter transcribes audio from source_uri via OpenAI hosted transcription with error taxonomy",
+      "status": "pass",
+      "evidence": "test_asr.py with mocked OpenAI; ASR_PROVIDER=openai on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "workflow-polling",
+      "name": "Workflow Status Polling",
+      "description": "GET /api/v1/workflows/{id} returns status machine state and tool execution details",
+      "status": "pass",
+      "evidence": "test_jobs.py; Postman polling on GCP async batch",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "agent-runtime",
+      "name": "Agent Runtime Loop",
+      "description": "AgentRuntime plans, validates, executes tools with loop guard and persists agent_steps to DB",
+      "status": "pass",
+      "evidence": "test_agent.py; GCP Postman E2E — agent runs and DB updated as expected",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "planner-heuristic",
+      "name": "Heuristic Planner",
+      "description": "Keyword-based planner detects email, calendar, slack, jira intents from transcript sentences",
+      "status": "pass",
+      "evidence": "test_planner.py; default LLM_PROVIDER fallback for local dev",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "planner-openai",
+      "name": "OpenAI Planner",
+      "description": "OpenAI Responses API structured PlanResult with tool calls, tasks, and decisions",
+      "status": "pass",
+      "evidence": "test_planner.py with mocked OpenAI; LLM_PROVIDER=openai on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "embeddings-heuristic",
+      "name": "Heuristic Embedder",
+      "description": "Bag-of-words embedder for zero-cost local dev and in-memory cosine search",
+      "status": "pass",
+      "evidence": "test_embeddings.py; default EMBEDDING_PROVIDER=heuristic",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "embeddings-openai",
+      "name": "OpenAI Embedder + pgvector",
+      "description": "OpenAIEmbedder writes 1536-dim vectors; PgVectorEmbeddingIndex for ANN search on Postgres",
+      "status": "pass",
+      "evidence": "test_embeddings.py; migration 0002/0004; EMBEDDING_PROVIDER=openai on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "meeting-search",
+      "name": "Meeting Semantic Search",
+      "description": "GET /api/v1/meetings/search with query embedding, cursor pagination, and relevance scores",
+      "status": "pass",
+      "evidence": "test_api.py; test_query.py; Postman search on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "chunk-search",
+      "name": "Chunk Semantic Search",
+      "description": "GET /api/v1/meetings/chunks/search for transcript chunk-level retrieval",
+      "status": "pass",
+      "evidence": "test_query.py; chunk_embedding from migration 0004",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "decision-search",
+      "name": "Decision Semantic Search",
+      "description": "GET /api/v1/decisions with topic_embedding semantic match (replaces substring filter)",
+      "status": "pass",
+      "evidence": "test_query.py; test_api.py decisions endpoint",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "rag-query",
+      "name": "RAG Query with Citations",
+      "description": "POST /api/v1/query retrieves from meetings, chunks, and decisions then answers with citations",
+      "status": "pass",
+      "evidence": "test_query.py; test_api.py; QUERY_PROVIDER=openai on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "tasks-retrieval",
+      "name": "Meeting Tasks",
+      "description": "GET /api/v1/meetings/{id}/tasks returns action items extracted during agent run",
+      "status": "pass",
+      "evidence": "test_api.py::test_batch_ingestion_and_retrieval",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "tool-executor",
+      "name": "Tool Executor",
+      "description": "ToolExecutor with SHA-256 idempotency keys, retries, attempt logging, and DLQ-style failure metadata",
+      "status": "pass",
+      "evidence": "test_tools.py; test_tool_providers.py",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "tool-email-stub",
+      "name": "Email Tool (Stub)",
+      "description": "Stub email provider executes immediately without external API call for local dev",
+      "status": "pass",
+      "evidence": "test_tool_providers.py; EMAIL_PROVIDER=stub default; GCP runs stub",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "tool-calendar-stub",
+      "name": "Calendar Tool (Stub)",
+      "description": "Stub calendar provider returns approval_required for two-phase human gate flow",
+      "status": "pass",
+      "evidence": "test_tools.py calendar approval flow; test_approvals.py",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "tool-slack-stub",
+      "name": "Slack Tool (Stub)",
+      "description": "Stub Slack provider logs notification without calling Slack API",
+      "status": "pass",
+      "evidence": "test_tool_providers.py; SLACK_PROVIDER=stub default",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "tool-jira-stub",
+      "name": "Jira Tool (Stub)",
+      "description": "Stub Jira provider simulates issue creation without Jira REST call",
+      "status": "pass",
+      "evidence": "test_tool_providers.py; JIRA_PROVIDER=stub default",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "approval-flow",
+      "name": "Human Approval Flow",
+      "description": "approval_requests table, workflow awaiting_approval status, approve/reject resumes AgentRuntime from DB",
+      "status": "pass",
+      "evidence": "test_approvals.py; test_agent.py resume; migration 0003",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "admin-approval-html",
+      "name": "Admin Approval HTML Page",
+      "description": "GET /admin/approvals/{id} renders minimal inline HTML with approve/reject buttons",
+      "status": "pass",
+      "evidence": "api/routes/admin.py; manual browser test for calendar approval",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "auth-api-key-jwt",
+      "name": "API Key and JWT Auth",
+      "description": "Opt-in auth via X-API-Key or Bearer JWT with require_auth on /api/v1 and /admin routes",
+      "status": "pass",
+      "evidence": "test_auth.py; AUTH_ENABLED=false default — code complete, not enabled in GCP prod",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "rate-limiting",
+      "name": "Rate Limiting",
+      "description": "Optional slowapi limits on batch, query, and default routes keyed by client IP",
+      "status": "pass",
+      "evidence": "api/rate_limit.py; RATE_LIMIT_ENABLED=true in .env.production.example",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "structured-logging",
+      "name": "Structured JSON Logging",
+      "description": "structlog JSON output for production log aggregation in Cloud Logging",
+      "status": "pass",
+      "evidence": "core/logging.py; LOG_JSON=true on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "redis-arq-queue",
+      "name": "Redis + ARQ Job Queue",
+      "description": "ArqBatchJobQueue enqueues run_batch_workflow to Redis; separate Cloud Run worker consumes jobs",
+      "status": "pass",
+      "evidence": "test_jobs.py; GCP API + worker with JOB_QUEUE_PROVIDER=arq and Upstash Redis",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "gcs-audio-storage",
+      "name": "GCS Audio Storage",
+      "description": "Audio upload and ASR source reads from Google Cloud Storage bucket",
+      "status": "pass",
+      "evidence": "test_audio_storage.py GCS tests; ASR_GCS_BUCKET configured on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "gcp-cloud-run-deploy",
+      "name": "GCP Cloud Run Deployment",
+      "description": "Dockerfile, Makefile targets for API and ARQ worker on Cloud Run with Cloud SQL socket",
+      "status": "pass",
+      "evidence": "Makefile deploy-api/deploy-worker; user verified E2E from Postman on GCP",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "ci-pipeline",
+      "name": "CI Pipeline",
+      "description": "GitHub Actions: ruff, mypy, pytest on SQLite, Postgres migration smoke job",
+      "status": "pass",
+      "evidence": ".github/workflows/ci.yml",
+      "testedAt": "2026-07-17"
+    },
+    {
+      "id": "tool-slack-live",
+      "name": "Slack Live Integration",
+      "description": "SLACK_PROVIDER=webhook or api sends real messages to Slack channel on agent notify action. v1 deploy-level; Phase 13 moves to per-user workspace OAuth with Meeting Assistant bot identity.",
+      "status": "pass",
+      "evidence": "SLACK_PROVIDER=webhook on GCP Cloud Run; batch with slack keyword delivers messages to Slack channel; test_tool_providers.py + test_tools.py webhook path; 64 pytest pass",
+      "testedAt": "2026-07-20"
+    },
+    {
+      "id": "tool-email-sendgrid",
+      "name": "SendGrid Email Integration",
+      "description": "EMAIL_PROVIDER=sendgrid sends real transactional email via SendGrid API with idempotency metadata. v1 deploy-level sender; Phase 13 adds per-user notification prefs with Meeting Assistant branded From.",
+      "status": "pass",
+      "evidence": "EMAIL_PROVIDER=sendgrid on GCP Cloud Run; batch with email keyword delivers mail via SendGrid; test_tool_providers.py + test_tools.py sendgrid path; 68 pytest pass",
+      "testedAt": "2026-07-21"
+    },
+    {
+      "id": "tool-calendar-google",
+      "name": "Google Calendar Integration",
+      "description": "CALENDAR_PROVIDER=google creates calendar events after human approval via Google Calendar API. v1 service-account deploy-level; Phase 13 uses assistant-owned calendar organizer + user invite.",
+      "status": "pass",
+      "evidence": "CALENDAR_PROVIDER=google on GCP Cloud Run; batch with calendar keyword → awaiting_approval → approve → event in Google Calendar; test_tool_providers.py google calendar tests; 73 pytest pass",
+      "testedAt": "2026-07-21"
+    },
+    {
+      "id": "tool-jira-live",
+      "name": "Jira Live Integration",
+      "description": "COMMENTED OUT / deferred. JIRA_PROVIDER=rest wiring exists in factory and tests but deploy env and planner jira blocks are disabled. Re-enable by uncommenting deploy/.env.prod, Makefile, and planner.py sections.",
+      "status": "not_started"
+    },
+    {
+      "id": "auth-enabled-prod",
+      "name": "Auth Enabled in Production",
+      "description": "AUTH_ENABLED=true on GCP with API keys in Secret Manager; all Postman/frontend calls require X-API-Key. Flip AUTH_ENABLED in deploy/.env.prod and configure GCP_AUTH_KEYS_SECRET before external users.",
+      "status": "pass",
+      "evidence": "AUTH_ENABLED=true on GCP Cloud Run; batch without X-API-Key returns 401; Postman with scoped API key succeeds; test_auth.py including public /health and /ready; 79 pytest pass",
+      "testedAt": "2026-07-21"
+    },
+    {
+      "id": "frontend-mvp",
+      "name": "Frontend MVP",
+      "description": "Web app for upload, workflow status, search, RAG query, and approval inbox replacing Postman workflow. Recommended: Next.js or Vite+React in frontend/; OpenAPI client; CORS on API; deploy to Vercel or Cloud Run.",
+      "status": "pass",
+      "evidence": "frontend/ Vite+React+TS app with Upload, Workflow, Search, Ask, Approvals screens; MEETING_ASSISTANT_CORS_ORIGINS + CORSMiddleware; npm run build pass; test_cors_allows_configured_frontend_origin; 80 pytest pass",
+      "testedAt": "2026-07-21"
+    },
+    {
+      "id": "frontend-upload",
+      "name": "Frontend Upload Screen",
+      "description": "UI to paste transcript text or upload audio file triggering batch or batch/upload endpoints. Depends on frontend-mvp; shows workflow_run_id and links to status view.",
+      "status": "pass",
+      "evidence": "Upload form + last batch result persist in SessionContext/localStorage; direct links to workflow and approvals; user-verified batch → approval flow",
+      "testedAt": "2026-07-21"
+    },
+    {
+      "id": "frontend-workflow-status",
+      "name": "Frontend Workflow Status",
+      "description": "Live polling UI for workflow status, tool executions, and approval prompts. Poll GET /workflows/{id}; surface awaiting_approval with approve/reject actions.",
+      "status": "pass",
+      "evidence": "Workflow page auto-loads active workflow from session/URL; 3s polling; sidebar Active workflow banner; user-verified status after approval",
+      "testedAt": "2026-07-21"
+    },
+    {
+      "id": "frontend-search-query",
+      "name": "Frontend Search and Query",
+      "description": "Search meetings/chunks/decisions and RAG chat interface with citation display. Wire GET search endpoints and POST /query with pagination cursors.",
+      "status": "pass",
+      "evidence": "Search page: meetings + chunks + decisions with Load more cursor pagination; Query page: citations + retrieved context (meetings/chunks/tasks/decisions); searchQuery/lastQuestion session persistence; npm run build pass; 80 pytest pass",
+      "testedAt": "2026-07-22"
+    },
+    {
+      "id": "frontend-approval-inbox",
+      "name": "Frontend Approval Inbox",
+      "description": "Replace admin HTML page with styled approval list and detail view in frontend app. GET /workflows/{id}/approvals and POST approve/reject; especially for calendar events.",
+      "status": "pass",
+      "evidence": "Approvals page auto-loads active workflow from session/URL; approve/reject persists workflow ID across navigation; user-verified calendar approval flow",
+      "testedAt": "2026-07-21"
+    },
+    {
+      "id": "security-workflow-scoping",
+      "name": "Workflow User Scoping",
+      "description": "assert_user_scope on workflow and approval endpoints to prevent cross-tenant IDOR. Documented gap in ARCHITECTURE.md; required before multi-tenant external launch.",
+      "status": "pass",
+      "evidence": "assert_resource_user_scope on GET /workflows/{id}, GET /workflows/{id}/approvals, POST approve/reject, admin HTML; repository owner lookup; test_workflow_scoping.py (403 cross-user, 404 missing, unscoped admin key); 85 pytest pass",
+      "testedAt": "2026-07-22"
+    },
+    {
+      "id": "integrations-schema",
+      "name": "User Integrations Schema",
+      "description": "Alembic migration for user_integrations table: encrypted OAuth tokens, provider status, settings_json (channels, notification emails). Links to users.id. See ARCHITECTURE.md ADR-15/16.",
+      "status": "pass",
+      "evidence": "migration 0005_user_integrations; UserIntegration ORM + TokenEncryptor (Fernet); Repository upsert/list/revoke; test_user_integrations.py (9 tests); test_migrations.py; 94 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "integrations-oauth-api",
+      "name": "Integrations OAuth API",
+      "description": "GET /integrations, connect/callback/disconnect/settings/options per provider. Server-side token exchange; tokens never returned to frontend. Scoped to authenticated user.",
+      "status": "pass",
+      "evidence": "api/routes/integrations.py + IntegrationService; stub Slack/Google OAuth + email_prefs immediate connect; signed OAuth state; public callback; test_integrations_api.py (10 tests); 104 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "integrations-slack-workspace",
+      "name": "Slack Workspace Connect",
+      "description": "Slack OAuth app install per user/workspace. Bot posts as Meeting Assistant identity (not user). User picks allowed channels in settings_json. Replaces deploy-level webhook for multi-user.",
+      "status": "pass",
+      "evidence": "UserSlackToolProvider + UserToolProviderFactory (slack.notify); allowed channel enforcement; ToolExecutor per-user resolution with deploy fallback; test_user_slack_integration.py (6 tests); 110 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "integrations-email-preferences",
+      "name": "Email Notification Preferences",
+      "description": "Per-user notification email addresses and opt-in flags. Outbound mail uses deploy-level SendGrid with Meeting Assistant branded From (notifications@domain); no Gmail send-as-user.",
+      "status": "pass",
+      "evidence": "UserEmailToolProvider + factory email.send path; notifications_enabled opt-in; branded From via EMAIL_FROM_NAME; deploy SendGrid fallback; frontend opt-in checkbox; test_user_email_integration.py (5 tests); 115 pytest pass; npm run build",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "integrations-calendar-assistant",
+      "name": "Assistant Calendar Organizer",
+      "description": "Calendar events created on Meeting Assistant owned calendar; user invited as attendee. Optional Google OAuth read for availability. Two-phase approval unchanged. Replaces user-impersonation service account pattern for multi-user.",
+      "status": "pass",
+      "evidence": "AssistantCalendarToolProvider (assistant SA writes, user invite_email attendee, approval gate); UserToolProviderFactory calendar path; Google OAuth stores read token + invite_email; frontend invite field; test_user_calendar_integration.py (5 tests); 120 pytest pass; npm run build",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "integrations-per-user-tools",
+      "name": "Per-User Tool Provider Factory",
+      "description": "UserToolProviderFactory resolves ToolProvider from meeting.user_id + connected integrations. Planner filters available_tools. ToolExecutor returns integration_not_connected when provider missing.",
+      "status": "pass",
+      "evidence": "UserToolProviderFactory.available_tools + for_user; PlannerRuntimeState.available_tools filters heuristic/OpenAI plans; AgentRuntime passes per-user tools; ToolExecutor SKIPPED integration_not_connected when no user/deploy provider; test_per_user_tools.py (7 tests); 127 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "integrations-settings-ui",
+      "name": "Frontend Integrations Settings",
+      "description": "Settings → Integrations page: connect/disconnect Slack, Google, email prefs; channel picker; shows 'Actions appear as Meeting Assistant' copy. Depends on integrations-oauth-api.",
+      "status": "pass",
+      "evidence": "frontend/src/pages/IntegrationsPage.tsx at /settings/integrations; Slack channel + Google calendar pickers + email prefs; OAuth redirect via frontend_redirect; npm run build pass; 104 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "auth-user-login",
+      "name": "User Login (JWT Sessions)",
+      "description": "Replace browser API-key panel with proper login (JWT sessions or Auth0/Clerk). Frontend stores session cookie or short-lived token; integrates with scoped user identity for integrations.",
+      "status": "pass",
+      "evidence": "POST /api/v1/auth/login (API key exchange + dev credentials); GET /auth/config + /auth/me; Bearer JWT accepted with auth_mode=api_key; AuthPanel replaces ApiConfigPanel; accessToken in localStorage; test_auth_login.py (6 tests); 133 pytest pass; npm run build",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "security-approve-lock",
+      "name": "Distributed Approve Lock",
+      "description": "Redis-based lock prevents concurrent approve/reject race on the same approval_request. Use Redis SET NX when AUTH_ENABLED and multiple approvers are possible.",
+      "status": "pass",
+      "evidence": "RedisApprovalLock SET NX + token release script; build_approval_lock when auth_enabled + redis_url; ApprovalService hold_approval_lock; HTTP 409 on ApprovalLockBusy; test_approval_lock.py (6 tests); 139 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "security-rate-limit-api-key",
+      "name": "Rate Limit by API Key",
+      "description": "Rate limits keyed by API key or user identity instead of client IP only. Important behind NAT and for fair per-tenant quotas.",
+      "status": "pass",
+      "evidence": "get_rate_limit_key prefers scoped API key / JWT sub / query user_external_id over IP; X-Forwarded-For IP fallback; configurable batch/query limits; test_rate_limit.py (4 tests); 143 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "ops-worker-readiness",
+      "name": "Worker Readiness Probe",
+      "description": "/ready or separate endpoint verifies ARQ worker is running and consuming jobs. Today /ready checks API deps only; stale PENDING workflows indicate a dead worker.",
+      "status": "pass",
+      "evidence": "/ready checks ARQ heartbeat key in Redis when batch async + job_queue arq; WorkerSettings health_check_interval=30s; worker Cloud Run entrypoint exposes /ready; test_worker_readiness.py (3 tests); 146 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "ops-stale-workflow-alerts",
+      "name": "Stale Workflow Alerting",
+      "description": "Monitoring alert when workflow_runs remain PENDING beyond configurable threshold. Cloud Monitoring log metric or scheduled query on workflow_runs.status.",
+      "status": "pass",
+      "evidence": "GET /admin/ops/stale-workflows lists PENDING workflows older than threshold; structured log stale_workflow_detected for GCP log metrics; stale_workflow_threshold_minutes config; test_stale_workflows.py (5 tests); 151 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "ops-otel-tracing",
+      "name": "OpenTelemetry Tracing",
+      "description": "Distributed traces across API, ARQ worker, and external tool calls for debuggability. core/telemetry.py exists; enable OTEL exporter on API and worker Cloud Run services.",
+      "status": "pass",
+      "evidence": "configure_telemetry on API + worker; W3C trace context in ARQ job payloads; batch.process_workflow + tool.execute spans; FastAPI/SQLAlchemy/httpx auto-instrumentation; Makefile OTEL_ENABLED deploy vars; test_telemetry.py (9 tests); 160 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "ops-failed-tool-alerts",
+      "name": "Failed Tool Execution Alerts",
+      "description": "Alert or dashboard for tool_executions in failed status and DLQ-style retry exhaustion. Log-based metric on tool_executions.status=failed or attempt count threshold.",
+      "status": "pass",
+      "evidence": "GET /admin/ops/failed-tools lists failed executions in lookback window; structured log failed_tool_detected with dlq + retry_exhausted; failed_tool_alert_enabled + lookback config; test_failed_tools.py (5 tests); 165 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "dev-docker-compose",
+      "name": "Local Docker Compose Stack",
+      "description": "docker-compose.yml for Postgres, Redis, API, and worker for production-shaped local dev without GCP. Complements zero-infra SQLite dev; matches .env.production.example dependencies.",
+      "status": "pass",
+      "evidence": "docker-compose.yml (pgvector Postgres + Redis + API + worker); .env.compose.example; make compose-up/down/smoke/config; README + AGENTS.md; docker compose config -q; test_docker_compose.py (4 tests); 169 pytest pass",
+      "testedAt": "2026-07-26"
+    },
+    {
+      "id": "realtime-asr-streaming",
+      "name": "Real-time ASR Streaming",
+      "description": "Live meeting transcription stream instead of batch-only upload pipeline. v2 candidate per ARCHITECTURE.md; different product surface from batch-first v1.",
+      "status": "not_started"
+    }
+  ]
+}

@@ -1,9 +1,10 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from meeting_assistant.api.deps import get_container
+from meeting_assistant.api.auth import assert_resource_user_scope
+from meeting_assistant.api.deps import get_container, get_principal
 from meeting_assistant.container import Container
 
 router = APIRouter(tags=["admin"])
@@ -11,15 +12,23 @@ router = APIRouter(tags=["admin"])
 
 @router.get("/admin/approvals/{approval_request_id}", response_class=HTMLResponse)
 def approval_admin_page(
+    request: Request,
     approval_request_id: int,
     container: Container = Depends(get_container),
 ) -> HTMLResponse:
-    request = container.repository.get_approval_request(approval_request_id)
-    if request is None:
+    owner_id = container.repository.get_user_external_id_for_approval(approval_request_id)
+    assert_resource_user_scope(
+        get_principal(request),
+        user_external_id=owner_id,
+        not_found_detail=f"Approval request {approval_request_id} not found",
+    )
+
+    approval_request = container.repository.get_approval_request(approval_request_id)
+    if approval_request is None:
         raise HTTPException(status_code=404, detail=f"Approval request {approval_request_id} not found")
 
-    payload = json.dumps(json.loads(request.payload), indent=2)
-    pending = request.status.value == "pending"
+    payload = json.dumps(json.loads(approval_request.payload), indent=2)
+    pending = approval_request.status.value == "pending"
     actions = ""
     if pending:
         actions = f"""
@@ -28,7 +37,7 @@ def approval_admin_page(
   <p id="result"></p>
   <script>
     async function resolve(action) {{
-      const response = await fetch('/api/v1/approvals/{request.id}/' + action, {{
+      const response = await fetch('/api/v1/approvals/{approval_request.id}/' + action, {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ resolved_by: 'admin-ui' }}),
@@ -45,7 +54,7 @@ def approval_admin_page(
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Approval Request #{request.id}</title>
+  <title>Approval Request #{approval_request.id}</title>
   <style>
     body {{ font-family: sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }}
     .meta {{ background: #f5f5f5; padding: 1rem; border-radius: 8px; }}
@@ -56,11 +65,11 @@ def approval_admin_page(
   </style>
 </head>
 <body>
-  <h1>Approval Request #{request.id}</h1>
+  <h1>Approval Request #{approval_request.id}</h1>
   <div class="meta">
-    <p><strong>Workflow:</strong> {request.workflow_run_id}</p>
-    <p><strong>Tool:</strong> {request.tool_name}</p>
-    <p><strong>Status:</strong> {request.status.value}</p>
+    <p><strong>Workflow:</strong> {approval_request.workflow_run_id}</p>
+    <p><strong>Tool:</strong> {approval_request.tool_name}</p>
+    <p><strong>Status:</strong> {approval_request.status.value}</p>
     <p><strong>Payload:</strong></p>
     <pre>{payload}</pre>
   </div>

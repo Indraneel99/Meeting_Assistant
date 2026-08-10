@@ -5,6 +5,7 @@ from meeting_assistant.repositories import Repository
 from meeting_assistant.services.agent import AgentRuntime
 from meeting_assistant.services.approvals import ApprovalService
 from meeting_assistant.services.audio_storage import AudioUploadStore
+from meeting_assistant.services.integrations import IntegrationService
 from meeting_assistant.services.orchestrator import BatchOrchestrator
 from meeting_assistant.services.query import QueryService
 
@@ -18,3 +19,4 @@ class Container:
     query_service: QueryService
     audio_upload_store: AudioUploadStore
     approval_service: ApprovalService
+    integration_service: IntegrationService

@@ -7,6 +7,7 @@ from meeting_assistant.db.models import ApprovalRequestStatus, WorkflowStatus
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.approval import ApprovalRequestResponse, ApprovalResolutionResponse
 from meeting_assistant.services.agent import AgentRuntime
+from meeting_assistant.services.approval_lock import ApprovalLock, NoOpApprovalLock, hold_approval_lock
 from meeting_assistant.services.context import ContextLoader
 from meeting_assistant.services.embeddings import EmbeddingIndex
 from meeting_assistant.services.tools import ToolExecutor
@@ -19,6 +20,11 @@ class ApprovalService:
     agent_runtime: AgentRuntime
     context_loader: ContextLoader
     embedding_index: EmbeddingIndex
+    approval_lock: ApprovalLock | None = None
+
+    def __post_init__(self) -> None:
+        if self.approval_lock is None:
+            self.approval_lock = NoOpApprovalLock()
 
     def list_workflow_approvals(self, workflow_run_id: int) -> list[ApprovalRequestResponse]:
         workflow_run = self.repository.get_workflow_run(workflow_run_id)
@@ -37,6 +43,21 @@ class ApprovalService:
         return self._resolve(approval_request_id, approved=False, resolved_by=resolved_by)
 
     def _resolve(
+        self,
+        approval_request_id: int,
+        *,
+        approved: bool,
+        resolved_by: str | None,
+    ) -> ApprovalResolutionResponse:
+        assert self.approval_lock is not None
+        with hold_approval_lock(self.approval_lock, approval_request_id):
+            return self._resolve_locked(
+                approval_request_id,
+                approved=approved,
+                resolved_by=resolved_by,
+            )
+
+    def _resolve_locked(
         self,
         approval_request_id: int,
         *,
@@ -73,12 +94,20 @@ class ApprovalService:
 
         self.repository.update_workflow_status(request.workflow_run_id, WorkflowStatus.EXECUTING)
         context = self.context_loader.load(meeting.user_id, meeting.transcript_text)
-        agent_result = self.agent_runtime.resume(
-            workflow_run_id=request.workflow_run_id,
-            title=meeting.title,
-            transcript_text=meeting.transcript_text,
-            context=context,
-        )
+        try:
+            agent_result = self.agent_runtime.resume(
+                workflow_run_id=request.workflow_run_id,
+                title=meeting.title,
+                transcript_text=meeting.transcript_text,
+                context=context,
+            )
+        except Exception as exc:
+            self.repository.update_workflow_status(
+                request.workflow_run_id,
+                WorkflowStatus.FAILED,
+                str(exc),
+            )
+            raise
 
         embedding = self.embedding_index.embed(agent_result.summary)
         self.repository.complete_meeting(

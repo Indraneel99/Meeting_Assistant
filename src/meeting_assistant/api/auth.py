@@ -75,10 +75,11 @@ def resolve_principal(
     if not settings.auth_enabled:
         return AuthPrincipal(auth_type="disabled", user_external_id=None)
 
-    if settings.auth_mode == "jwt":
-        if bearer is None or bearer.scheme.lower() != "bearer":
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required.")
+    if bearer is not None and bearer.scheme.lower() == "bearer":
         return _authenticate_jwt(settings, bearer.credentials)
+
+    if settings.auth_mode == "jwt":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bearer token required.")
 
     if api_key:
         return _authenticate_api_key(settings, api_key)
@@ -105,3 +106,14 @@ def assert_user_scope(principal: AuthPrincipal, user_external_id: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Credential is not authorized for the requested user.",
         )
+
+
+def assert_resource_user_scope(
+    principal: AuthPrincipal,
+    *,
+    user_external_id: str | None,
+    not_found_detail: str,
+) -> None:
+    if user_external_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
+    assert_user_scope(principal, user_external_id)

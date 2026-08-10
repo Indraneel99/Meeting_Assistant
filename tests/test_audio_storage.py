@@ -13,7 +13,12 @@ from meeting_assistant.services.asr import (
     LocalAudioSourceResolver,
     OpenAITranscriber,
 )
-from meeting_assistant.services.audio_storage import LocalAudioUploadStore, S3AudioUploadStore, validate_upload
+from meeting_assistant.services.audio_storage import (
+    GcsAudioUploadStore,
+    LocalAudioUploadStore,
+    S3AudioUploadStore,
+    validate_upload,
+)
 
 
 def test_local_audio_upload_store_returns_file_uri(tmp_path: Path) -> None:
@@ -32,6 +37,20 @@ def test_s3_audio_upload_store_returns_s3_uri() -> None:
 
     assert source_uri.startswith("s3://recordings/audio/")
     client.put_object.assert_called_once()
+
+
+def test_gcs_audio_upload_store_returns_gs_uri() -> None:
+    blob = MagicMock()
+    bucket = MagicMock()
+    bucket.blob.return_value = blob
+    client = MagicMock()
+    client.bucket.return_value = bucket
+    store = GcsAudioUploadStore(bucket="recordings", prefix="audio/", client=client)
+
+    source_uri = store.store("meeting.wav", b"audio-bytes", "audio/wav")
+
+    assert source_uri.startswith("gs://recordings/audio/")
+    blob.upload_from_string.assert_called_once()
 
 
 def test_validate_upload_rejects_oversized_file() -> None:

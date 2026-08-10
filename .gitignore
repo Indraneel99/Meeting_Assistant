@@ -3,3 +3,8 @@ __pycache__/
 .pytest_cache/
 
 .env
+.env.production
+.env.compose
+deploy/.env.prod
+meeting_assistant.db
+secrets/

@@ -68,6 +68,43 @@ class S3AudioUploadStore:
         return f"s3://{self.bucket}/{key}"
 
 
+class GcsAudioUploadStore:
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        prefix: str = "audio/",
+        client: Any | None = None,
+    ) -> None:
+        self.bucket = bucket
+        self.prefix = prefix if prefix.endswith("/") or not prefix else f"{prefix}/"
+        self._client = client
+
+    def _get_client(self) -> Any:
+        if self._client is not None:
+            return self._client
+        try:
+            from google.cloud import storage
+        except ImportError as exc:
+            raise ASRError(
+                ASRErrorCode.PROVIDER_ERROR,
+                "google-cloud-storage is required for GCS audio uploads.",
+                details={"install": "pip install google-cloud-storage"},
+            ) from exc
+        return storage.Client()
+
+    def store(self, filename: str, content: bytes, content_type: str) -> str:
+        blob_name = f"{self.prefix}{uuid4().hex}_{Path(filename).name or 'audio.bin'}"
+        client = self._get_client()
+        bucket = client.bucket(self.bucket)
+        blob = bucket.blob(blob_name)
+        blob.upload_from_string(
+            content,
+            content_type=content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream",
+        )
+        return f"gs://{self.bucket}/{blob_name}"
+
+
 def validate_upload(filename: str, content: bytes, content_type: str, *, max_bytes: int) -> None:
     if len(content) > max_bytes:
         raise ASRError(
@@ -86,6 +123,15 @@ def validate_upload(filename: str, content: bytes, content_type: str, *, max_byt
 
 
 def build_audio_upload_store(settings: Settings) -> AudioUploadStore:
+    if settings.asr_upload_backend == "gcs":
+        if not settings.asr_gcs_bucket:
+            raise ValueError("MEETING_ASSISTANT_ASR_GCS_BUCKET is required when asr_upload_backend=gcs.")
+        logger.info("Audio upload backend=gcs bucket=%s", settings.asr_gcs_bucket)
+        return GcsAudioUploadStore(
+            bucket=settings.asr_gcs_bucket,
+            prefix=settings.asr_gcs_upload_prefix,
+        )
+
     if settings.asr_upload_backend == "s3":
         if not settings.asr_s3_bucket:
             raise ValueError("MEETING_ASSISTANT_ASR_S3_BUCKET is required when asr_upload_backend=s3.")

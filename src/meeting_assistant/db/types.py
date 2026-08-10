@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy.types import TypeDecorator, UserDefinedType
+from sqlalchemy.types import Float, TypeDecorator, UserDefinedType
 
 EMBEDDING_DIMENSIONS = 1536
 
@@ -13,6 +13,13 @@ class EmbeddingVector(TypeDecorator[list[float]]):
 
     impl = UserDefinedType
     cache_ok = True
+
+    class comparator_factory(TypeDecorator.Comparator):
+        def cosine_distance(self, other: list[float]) -> Float:
+            return self.expr.op("<=>", return_type=Float)(other)
+
+        def l2_distance(self, other: list[float]) -> Float:
+            return self.expr.op("<->", return_type=Float)(other)
 
     def load_dialect_impl(self, dialect: Any) -> Any:
         if dialect.name == "postgresql":

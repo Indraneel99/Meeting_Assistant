@@ -22,5 +22,9 @@ def readiness(
     report = build_readiness_report(container, settings)
     return JSONResponse(
         status_code=200 if report.is_ready else 503,
-        content={"status": report.status, "checks": report.checks},
+        content={
+            "status": report.status,
+            "checks": report.checks,
+            **({"details": report.details} if report.details else {}),
+        },
     )

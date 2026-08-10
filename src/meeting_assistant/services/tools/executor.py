@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import Callable
 
+from meeting_assistant.core.telemetry import trace_tool_execution
 from meeting_assistant.db.models import ToolExecutionStatus
 from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.planner import ToolCall
@@ -13,6 +14,7 @@ from meeting_assistant.services.tools.base import (
     ToolExecutionOutcome,
     ToolProvider,
 )
+from meeting_assistant.services.tools.user_factory import USER_INTEGRATION_TOOLS, UserToolProviderFactory
 
 
 class ToolExecutor:
@@ -21,6 +23,7 @@ class ToolExecutor:
         repository: Repository,
         *,
         providers: dict[str, ToolProvider] | None = None,
+        user_tool_factory: UserToolProviderFactory | None = None,
         max_retries: int = 3,
         backoff_seconds: float = 1.0,
         sleep_fn: Callable[[float], None] | None = None,
@@ -30,8 +33,13 @@ class ToolExecutor:
         self.backoff_seconds = backoff_seconds
         self.sleep_fn = sleep_fn or time.sleep
         self.providers = providers or {}
+        self.user_tool_factory = user_tool_factory
 
     def execute(self, workflow_run_id: int, tool_call: ToolCall) -> ToolExecutionOutcome:
+        with trace_tool_execution(workflow_run_id, tool_call.tool_name):
+            return self._execute(workflow_run_id, tool_call)
+
+    def _execute(self, workflow_run_id: int, tool_call: ToolCall) -> ToolExecutionOutcome:
         payload_blob = json.dumps(tool_call.payload, sort_keys=True)
         idempotency_key = hashlib.sha256(f"{tool_call.tool_name}:{payload_blob}".encode()).hexdigest()
 
@@ -60,8 +68,32 @@ class ToolExecutor:
             result=json.dumps({"state": "pending"}),
         )
 
-        provider = self.providers.get(tool_call.tool_name)
+        provider = self._resolve_provider(workflow_run_id, tool_call.tool_name)
         if provider is None:
+            if (
+                self.user_tool_factory is not None
+                and tool_call.tool_name in USER_INTEGRATION_TOOLS
+            ):
+                result = {
+                    "error": "integration_not_connected",
+                    "tool_name": tool_call.tool_name,
+                    "message": f"Integration not connected for {tool_call.tool_name}.",
+                }
+                self.repository.create_tool_execution_attempt(
+                    execution.id, 1, ToolExecutionStatus.SKIPPED.value, json.dumps(result), None
+                )
+                self.repository.update_tool_execution(
+                    execution.id,
+                    status=ToolExecutionStatus.SKIPPED,
+                    result=json.dumps(result),
+                )
+                return ToolExecutionOutcome(
+                    status=ToolExecutionStatus.SKIPPED.value,
+                    result=result,
+                    attempts=1,
+                    idempotency_key=idempotency_key,
+                )
+
             result = {"error": f"Unsupported tool: {tool_call.tool_name}", "dlq": True}
             self.repository.create_tool_execution_attempt(
                 execution.id, 1, ToolExecutionStatus.FAILED.value, None, result["error"]
@@ -143,6 +175,16 @@ class ToolExecutor:
                 if attempt_number < self.max_retries:
                     self.sleep_fn(self.backoff_seconds * (2 ** (attempt_number - 1)))
                     continue
+            except RuntimeError as exc:
+                last_error = str(exc)
+                self.repository.create_tool_execution_attempt(
+                    execution.id,
+                    attempt_number,
+                    ToolExecutionStatus.FAILED.value,
+                    None,
+                    last_error,
+                )
+                break
 
         failure_result = {
             "error": last_error or "Tool execution failed.",
@@ -172,7 +214,7 @@ class ToolExecutor:
         attempt_number = self._attempt_count(execution.id) + 1
 
         if approved:
-            provider = self.providers.get(execution.tool_name)
+            provider = self._resolve_provider(execution.workflow_run_id, execution.tool_name)
             if provider is None:
                 raise ValueError(f"Unsupported tool: {execution.tool_name}")
             if hasattr(provider, "execute_after_approval"):
@@ -221,6 +263,13 @@ class ToolExecutor:
             attempts=attempt_number,
             idempotency_key=execution.idempotency_key,
         )
+
+    def _resolve_provider(self, workflow_run_id: int, tool_name: str) -> ToolProvider | None:
+        if self.user_tool_factory is not None:
+            user_provider = self.user_tool_factory.for_workflow(workflow_run_id, tool_name)
+            if user_provider is not None:
+                return user_provider
+        return self.providers.get(tool_name)
 
     def _attempt_count(self, execution_id: int) -> int:
         return self.repository.count_tool_execution_attempts(execution_id)

@@ -8,6 +8,8 @@ from typing import Any, Protocol
 from arq import create_pool
 from arq.connections import RedisSettings
 
+from meeting_assistant.core.telemetry import inject_trace_context
+
 
 class BatchJobQueue(Protocol):
     def enqueue_batch(self, workflow_run_id: int, payload: dict[str, Any]) -> None:
@@ -29,7 +31,7 @@ class SyncBatchJobQueue:
     def enqueue_batch(self, workflow_run_id: int, payload: dict[str, Any]) -> None:
         if self._handler is None:
             raise RuntimeError("Batch job handler is not configured.")
-        self._handler(workflow_run_id, payload)
+        self._handler(workflow_run_id, inject_trace_context(payload))
 
 
 class InProcessBatchJobQueue:
@@ -46,7 +48,7 @@ class InProcessBatchJobQueue:
             raise RuntimeError("Batch job handler is not configured.")
         thread = threading.Thread(
             target=self._handler,
-            args=(workflow_run_id, payload),
+            args=(workflow_run_id, inject_trace_context(payload)),
             daemon=True,
         )
         thread.start()
@@ -64,7 +66,7 @@ class ArqBatchJobQueue:
     async def _enqueue(self, workflow_run_id: int, payload: dict[str, Any]) -> None:
         pool = await create_pool(self._redis_settings)
         try:
-            await pool.enqueue_job("process_batch_workflow", workflow_run_id, payload)
+            await pool.enqueue_job("process_batch_workflow", workflow_run_id, inject_trace_context(payload))
         finally:
             await pool.close()
 

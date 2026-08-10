@@ -3,11 +3,20 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from meeting_assistant.db.types import EmbeddingVector
+
+
+def str_enum(enum_type: type[StrEnum], *, name: str) -> SqlEnum:
+    """Persist StrEnum values (e.g. pending), not member names (PENDING)."""
+    return SqlEnum(
+        enum_type,
+        name=name,
+        values_callable=lambda enum: [member.value for member in enum],
+    )
 
 
 class Base(DeclarativeBase):
@@ -50,6 +59,46 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     meetings: Mapped[list["Meeting"]] = relationship(back_populates="user")
+    integrations: Mapped[list["UserIntegration"]] = relationship(back_populates="user")
+
+
+class IntegrationProvider(StrEnum):
+    SLACK = "slack"
+    GOOGLE = "google"
+    JIRA = "jira"
+    EMAIL_PREFS = "email_prefs"
+
+
+class IntegrationStatus(StrEnum):
+    CONNECTED = "connected"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+    ERROR = "error"
+
+
+class UserIntegration(Base):
+    __tablename__ = "user_integrations"
+    __table_args__ = (UniqueConstraint("user_id", "provider", "provider_account_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[IntegrationProvider] = mapped_column(
+        str_enum(IntegrationProvider, name="integrationprovider"),
+    )
+    status: Mapped[IntegrationStatus] = mapped_column(
+        str_enum(IntegrationStatus, name="integrationstatus"),
+        default=IntegrationStatus.CONNECTED,
+    )
+    scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_account_id: Mapped[str] = mapped_column(String(255), default="")
+    settings_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="integrations")
 
 
 class Meeting(Base):
@@ -205,7 +254,7 @@ class ApprovalRequest(Base):
     tool_name: Mapped[str] = mapped_column(String(255))
     payload: Mapped[str] = mapped_column(Text)
     status: Mapped[ApprovalRequestStatus] = mapped_column(
-        SqlEnum(ApprovalRequestStatus),
+        str_enum(ApprovalRequestStatus, name="approvalrequeststatus"),
         default=ApprovalRequestStatus.PENDING,
     )
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
