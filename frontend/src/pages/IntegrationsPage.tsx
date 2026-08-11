@@ -216,13 +216,14 @@ export function IntegrationsPage() {
               <label key={option.id} className="checkbox-row">
                 <input
                   type="checkbox"
-                  checked={selectedChannels.has(option.label)}
+                  checked={selectedChannels.has(option.id) || selectedChannels.has(option.label)}
                   onChange={(event) => {
                     const next = new Set(selectedChannels);
+                    next.delete(option.label);
                     if (event.target.checked) {
-                      next.add(option.label);
+                      next.add(option.id);
                     } else {
-                      next.delete(option.label);
+                      next.delete(option.id);
                     }
                     updateDraft(key, { channels: Array.from(next) });
                   }}

@@ -254,6 +254,11 @@ button:disabled {
   color: #991b1b;
 }
 
+.tool-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+}
+
 .badge-connected {
   background: #dcfce7;
   color: #166534;

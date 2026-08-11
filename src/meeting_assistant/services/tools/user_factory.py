@@ -202,7 +202,7 @@ class UserToolProviderFactory:
         ):
             access_token_provider = build_google_access_token_provider(
                 service_account_json=self.settings.calendar_google_service_account_json,
-                impersonate_subject=None,
+                impersonate_subject=self.settings.calendar_google_impersonate_subject,
             )
 
         return AssistantCalendarToolProvider(

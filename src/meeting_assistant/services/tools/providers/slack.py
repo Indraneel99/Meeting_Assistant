@@ -97,9 +97,26 @@ class SlackApiToolProvider:
 
 def normalize_slack_channel(value: str) -> str:
     trimmed = value.strip()
+    if not trimmed:
+        return trimmed
     if trimmed.startswith("#"):
         return trimmed.lower()
-    return trimmed
+    upper = trimmed.upper()
+    if (
+        len(upper) >= 9
+        and upper[0] in {"C", "G", "D"}
+        and upper[1:].isalnum()
+    ):
+        return upper
+    return f"#{trimmed.lower()}"
+
+
+def slack_api_channel(value: str) -> str:
+    """Format a stored channel label or ID for chat.postMessage."""
+    normalized = normalize_slack_channel(value)
+    if normalized.startswith("#"):
+        return normalized[1:]
+    return normalized
 
 
 class UserSlackToolProvider:
@@ -116,28 +133,33 @@ class UserSlackToolProvider:
     ) -> None:
         self.bot_token = bot_token
         self.workspace_id = workspace_id
-        self.allowed_channels = {normalize_slack_channel(channel) for channel in allowed_channels if channel.strip()}
+        self._allowed_by_normalized = {
+            normalize_slack_channel(channel): channel.strip()
+            for channel in allowed_channels
+            if channel.strip()
+        }
         self.http_client = http_client
         self.bot_display_name = bot_display_name
 
-    def execute(self, payload: dict[str, str], *, idempotency_key: str | None = None) -> dict[str, object]:
-        if payload.get("simulate_retryable_failure") == "true":
-            raise RetryableToolError("Simulated transient Slack delivery failure.")
-
-        if not self.allowed_channels:
+    def _resolve_channel(self, payload: dict[str, str]) -> tuple[str, str]:
+        if not self._allowed_by_normalized:
             raise RuntimeError("Slack workspace is connected but no allowed channels are configured.")
 
         requested = payload.get("channel") or payload.get("target")
         if requested:
             normalized = normalize_slack_channel(requested)
-            if normalized not in self.allowed_channels:
-                allowed = ", ".join(sorted(self.allowed_channels))
-                raise RuntimeError(
-                    f"Slack channel {requested!r} is not in the user's allowed channels: {allowed}"
-                )
-            channel = requested.strip()
-        else:
-            channel = next(iter(sorted(self.allowed_channels)))
+            if normalized in self._allowed_by_normalized:
+                stored = self._allowed_by_normalized[normalized]
+                return slack_api_channel(stored), stored
+
+        stored = sorted(self._allowed_by_normalized.values())[0]
+        return slack_api_channel(stored), stored
+
+    def execute(self, payload: dict[str, str], *, idempotency_key: str | None = None) -> dict[str, object]:
+        if payload.get("simulate_retryable_failure") == "true":
+            raise RetryableToolError("Simulated transient Slack delivery failure.")
+
+        api_channel, display_channel = self._resolve_channel(payload)
 
         text = payload.get("body") or payload.get("details") or payload.get("subject", "")
         response_payload = request_json(
@@ -150,13 +172,8 @@ class UserSlackToolProvider:
                 "Content-Type": "application/json; charset=utf-8",
             },
             json={
-                "channel": channel,
+                "channel": api_channel,
                 "text": text,
-                "username": self.bot_display_name,
-                "metadata": {
-                    "event_type": "meeting_assistant_tool",
-                    "event_payload": {"idempotency_key": idempotency_key, "workspace_id": self.workspace_id},
-                },
             },
         )
         if not response_payload.get("ok"):
@@ -168,7 +185,7 @@ class UserSlackToolProvider:
         return {
             "provider": "slack-user-workspace",
             "delivery_status": "accepted",
-            "channel": channel,
+            "channel": display_channel,
             "workspace_id": self.workspace_id,
             "identity": self.bot_display_name,
             "provider_message_id": response_payload.get("ts"),

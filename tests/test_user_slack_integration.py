@@ -13,7 +13,11 @@ from meeting_assistant.repositories import Repository
 from meeting_assistant.schemas.planner import ToolCall
 from meeting_assistant.services.token_encryption import TokenEncryptor
 from meeting_assistant.services.tools import ToolExecutor, build_tool_providers
-from meeting_assistant.services.tools.providers.slack import UserSlackToolProvider, normalize_slack_channel
+from meeting_assistant.services.tools.providers.slack import (
+    UserSlackToolProvider,
+    normalize_slack_channel,
+    slack_api_channel,
+)
 from meeting_assistant.services.tools.user_factory import UserToolProviderFactory
 
 
@@ -26,7 +30,10 @@ def build_repository() -> Repository:
 
 def test_normalize_slack_channel() -> None:
     assert normalize_slack_channel("#Product") == "#product"
-    assert normalize_slack_channel("C123") == "C123"
+    assert normalize_slack_channel("general") == "#general"
+    assert normalize_slack_channel("C123ABC01") == "C123ABC01"
+    assert slack_api_channel("#general") == "general"
+    assert slack_api_channel("C123ABC01") == "C123ABC01"
 
 
 def test_user_slack_provider_posts_as_meeting_assistant() -> None:
@@ -50,15 +57,35 @@ def test_user_slack_provider_posts_as_meeting_assistant() -> None:
     assert result["provider"] == "slack-user-workspace"
     assert result["identity"] == "Meeting Assistant"
     assert result["workspace_id"] == "T123"
-    assert captured["body"]["username"] == "Meeting Assistant"
-    assert captured["body"]["channel"] == "#product"
+    assert captured["body"]["channel"] == "product"
+    assert "username" not in captured["body"]
 
 
-def test_user_slack_provider_rejects_disallowed_channel() -> None:
+def test_user_slack_provider_falls_back_when_planner_channel_does_not_match() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content.decode())
+        return httpx.Response(200, json={"ok": True, "ts": "1234.5678"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
     provider = UserSlackToolProvider(
         bot_token="xoxb-user",
         workspace_id="T123",
         allowed_channels=["#product"],
+        http_client=client,
+    )
+
+    provider.execute({"channel": "general", "body": "Recap ready"})
+
+    assert captured["body"]["channel"] == "product"
+
+
+def test_user_slack_provider_rejects_disallowed_channel_when_no_fallback_configured() -> None:
+    provider = UserSlackToolProvider(
+        bot_token="xoxb-user",
+        workspace_id="T123",
+        allowed_channels=[],
         http_client=httpx.Client(),
     )
 
@@ -66,7 +93,7 @@ def test_user_slack_provider_rejects_disallowed_channel() -> None:
         provider.execute({"channel": "#secret", "body": "Nope"})
         raise AssertionError("Expected RuntimeError")
     except RuntimeError as exc:
-        assert "not in the user's allowed channels" in str(exc)
+        assert "no allowed channels are configured" in str(exc)
 
 
 def test_user_slack_provider_uses_first_allowed_channel_when_unspecified() -> None:
@@ -86,7 +113,7 @@ def test_user_slack_provider_uses_first_allowed_channel_when_unspecified() -> No
 
     provider.execute({"body": "Default channel post"})
 
-    assert captured["body"]["channel"] == "#general"
+    assert captured["body"]["channel"] == "general"
 
 
 def test_tool_executor_uses_connected_user_slack_integration() -> None:

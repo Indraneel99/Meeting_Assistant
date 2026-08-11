@@ -141,6 +141,9 @@ export function WorkflowPage() {
                 {status.tool_executions.map((tool) => (
                   <li key={tool.idempotency_key}>
                     <strong>{tool.tool_name}</strong> · {tool.status} · {tool.attempts} attempt(s)
+                    {tool.status === "failed" && typeof tool.result?.error === "string" && (
+                      <p className="error tool-error">{tool.result.error}</p>
+                    )}
                   </li>
                 ))}
               </ul>
