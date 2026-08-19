@@ -33,7 +33,7 @@ Open http://localhost:5173. The API enables CORS for `http://localhost:5173` by 
 
 ## Configuration
 
-Copy `.env.example` to `.env` or use the in-app **Sign in** panel (stored in `localStorage`).
+Copy `.env.example` to `.env`. Auth session is managed via `/login` when the API has auth enabled.
 
 | Variable | Purpose |
 |----------|---------|
@@ -41,7 +41,7 @@ Copy `.env.example` to `.env` or use the in-app **Sign in** panel (stored in `lo
 | `VITE_USER_EXTERNAL_ID` | Default user ID when auth is disabled |
 | `VITE_USER_EMAIL` | Default email when auth is disabled |
 
-When `MEETING_ASSISTANT_AUTH_ENABLED=true`, use **Sign in** to exchange a scoped API key for a short-lived JWT (`POST /api/v1/auth/login`). The app stores the Bearer token and scoped `user_external_id` / email from the login response. Set `MEETING_ASSISTANT_AUTH_JWT_SECRET` on the API. For local dev without keys, enable `MEETING_ASSISTANT_AUTH_LOGIN_ALLOW_DEV=true`.
+When `MEETING_ASSISTANT_AUTH_ENABLED=true`, use **Sign in** on `/login` (Phase 15: email/password or Google). Until Phase 15 ships, the legacy panel exchanges a scoped API key for JWT (`POST /api/v1/auth/login`). Set `MEETING_ASSISTANT_AUTH_JWT_SECRET` on the API. For local dev without keys, enable `MEETING_ASSISTANT_AUTH_LOGIN_ALLOW_DEV=true`.
 
 ## Integrations settings
 
@@ -56,6 +56,19 @@ Route: `/settings/integrations`
 OAuth providers redirect back to the frontend after connect. Upload at least one meeting first so your user record exists before connecting.
 
 See [`ARCHITECTURE.md`](../ARCHITECTURE.md) ADR-15 and `integrations-settings-ui` in [`features.json`](../features.json).
+
+## Login (Phase 15)
+
+Routes: `/login`, `/register`
+
+| Method | User action |
+|--------|-------------|
+| Email + password | Register or sign in → JWT stored in `localStorage` |
+| Google | Sign in with Google → OAuth (login scopes only) → JWT in URL fragment on redirect |
+
+When `MEETING_ASSISTANT_AUTH_ENABLED=true`, unauthenticated users are redirected to `/login`. The sidebar shows signed-in email and Sign out — no API key fields.
+
+Google login OAuth is **separate** from Settings → Integrations Google connect (calendar read). See ADR-17 in [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 ## Build
 

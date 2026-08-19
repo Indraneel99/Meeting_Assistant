@@ -6,7 +6,7 @@
 
 Single-service Python **Meeting Assistant** API (modular monolith) plus a **Vite+React frontend** in `frontend/`. Default dev stack: SQLite + in-process queue/embeddings + heuristic planner + stub tools.
 
-**Phase 13 (complete):** Per-user integrations — users connect Slack workspace, email notification prefs, and calendar via OAuth/settings UI. Outbound actions use **Meeting Assistant app identity** (Slack bot, branded email, assistant calendar), not user impersonation. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15/16 and [`features.json`](./features.json) `integrations-*` features.
+**Phase 15 (planned):** Proper login UI — email/password + Google Sign-In. Replaces browser API-key panel; Secret Manager keys remain for ops/Postman only. See [`progress.md`](./progress.md) Phase 15 and ADR-17 in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ### Services
 
@@ -66,9 +66,9 @@ After starting the server, POST a batch meeting with `transcript_text` to `/api/
 When `AUTH_ENABLED=true` (set in `deploy/.env.prod`):
 
 - `/health` and `/ready` remain **public** (no key required).
-- All `/api/v1/*` and `/admin/*` routes require **`X-API-Key`** or **`Authorization: Bearer <JWT>`** (from `POST /api/v1/auth/login`).
-- Secret Manager secret `meeting-assistant-api-keys` format: `user_external_id:api_key`  
-  Example: `indra:your-postman-secret` (scoped to `user_external_id=indra` in batch requests).
+- Browser users: **JWT** from email/password or Google login (Phase 15 — `POST /auth/login/email`, `/auth/google/connect`).
+- Ops / Postman / scripts: **`X-API-Key`** or legacy `POST /auth/login` with API key from Secret Manager.
+- Secret Manager `meeting-assistant-api-keys` format: `user_external_id:api_key` — **not for end-user browser login** after Phase 15.
 
 Postman example:
 

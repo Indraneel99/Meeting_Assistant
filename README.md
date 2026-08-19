@@ -41,6 +41,8 @@ Configure OAuth app credentials in `.env.production.example` (`SLACK_OAUTH_*`, `
 
 A Vite + React app lives in [`frontend/`](./frontend/). Run the API on port 8000, then `cd frontend && npm run dev` for port 5173. Screens: Upload, Workflow status, Search, Ask (RAG), Approvals, and **Settings → Integrations** for connect/disconnect flows. Auth via JWT login (`POST /api/v1/auth/login`) or `X-API-Key` header.
 
+**Phase 15 (planned):** Dedicated `/login` and `/register` pages with email/password and Sign in with Google — replacing the API-key panel. See `progress.md` Phase 15 handoff.
+
 ## Run locally
 
 ```bash
@@ -220,19 +222,20 @@ export MEETING_ASSISTANT_TOOL_EXECUTION_BACKOFF_MODE="background"
 
 ### Production hardening
 
-Auth is disabled by default for local development. Enable API key or JWT protection on `/api/v1/*` and `/admin/*`. The frontend uses `POST /api/v1/auth/login` to exchange an API key for a Bearer JWT.
+Auth is disabled by default for local development. Production uses JWT (`Authorization: Bearer`) from email/password or Google login (Phase 15). **API keys** remain for Postman/scripts only — stored in Secret Manager, not shown in the browser UI.
 
 ```bash
 export MEETING_ASSISTANT_AUTH_ENABLED="true"
-export MEETING_ASSISTANT_AUTH_MODE="api_key"
-export MEETING_ASSISTANT_AUTH_API_KEYS="alice:your-secret-key,service-admin:admin-key"
+export MEETING_ASSISTANT_AUTH_JWT_SECRET="your-32-byte-minimum-secret"
+export MEETING_ASSISTANT_AUTH_PASSWORD_LOGIN_ENABLED="true"
+export MEETING_ASSISTANT_AUTH_GOOGLE_LOGIN_ENABLED="true"
 ```
 
-Scoped keys use `user_external_id:api_key`. Keys without a prefix can access any user. JWT mode:
+Ops / M2M (optional — not for end-user browser login):
 
 ```bash
-export MEETING_ASSISTANT_AUTH_MODE="jwt"
-export MEETING_ASSISTANT_AUTH_JWT_SECRET="your-32-byte-minimum-secret"
+export MEETING_ASSISTANT_AUTH_MODE="api_key"
+export MEETING_ASSISTANT_AUTH_API_KEYS="service-admin:admin-key"
 ```
 
 Operational endpoints:

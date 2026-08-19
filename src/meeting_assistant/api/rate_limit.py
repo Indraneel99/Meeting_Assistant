@@ -71,17 +71,11 @@ def _client_ip(request: Request) -> str:
 limiter = Limiter(key_func=get_rate_limit_key, default_limits=[], enabled=False)
 
 
-def configure_limiter(settings: Settings) -> Limiter:
-    global _batch_limit, _query_limit
-    _batch_limit = settings.rate_limit_batch
-    _query_limit = settings.rate_limit_query
-    limiter.enabled = settings.rate_limit_enabled
-    limiter._default_limits = [settings.rate_limit_default] if settings.rate_limit_enabled else []
-    return limiter
-
-
 _batch_limit = "10/minute"
 _query_limit = "30/minute"
+_auth_register_limit = "10/hour"
+_auth_login_limit = "20/minute"
+_auth_google_callback_limit = "30/minute"
 
 
 def batch_rate_limit() -> str:
@@ -90,3 +84,31 @@ def batch_rate_limit() -> str:
 
 def query_rate_limit() -> str:
     return _query_limit
+
+
+def auth_register_rate_limit() -> str:
+    return _auth_register_limit
+
+
+def auth_login_rate_limit() -> str:
+    return _auth_login_limit
+
+
+def auth_google_callback_rate_limit() -> str:
+    return _auth_google_callback_limit
+
+
+def auth_ip_rate_limit_key(request: Request) -> str:
+    return f"auth:{_client_ip(request)}:{request.url.path}"
+
+
+def configure_limiter(settings: Settings) -> Limiter:
+    global _batch_limit, _query_limit, _auth_register_limit, _auth_login_limit, _auth_google_callback_limit
+    _batch_limit = settings.rate_limit_batch
+    _query_limit = settings.rate_limit_query
+    _auth_register_limit = settings.auth_rate_limit_register
+    _auth_login_limit = settings.auth_rate_limit_login
+    _auth_google_callback_limit = settings.auth_rate_limit_google_callback
+    limiter.enabled = settings.rate_limit_enabled
+    limiter._default_limits = [settings.rate_limit_default] if settings.rate_limit_enabled else []
+    return limiter

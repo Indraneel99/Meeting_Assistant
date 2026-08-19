@@ -28,6 +28,8 @@ def test_auth_config_reports_login_modes() -> None:
         payload = response.json()
         assert payload["auth_enabled"] is True
         assert payload["login_allow_dev"] is True
+        assert payload["password_login_enabled"] is True
+        assert payload["google_login_enabled"] is False
 
 
 def test_login_with_scoped_api_key_returns_jwt() -> None:

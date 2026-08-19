@@ -8,6 +8,8 @@ export interface ApiConfig {
 export interface AuthConfigResponse {
   auth_enabled: boolean;
   login_allow_dev: boolean;
+  password_login_enabled: boolean;
+  google_login_enabled: boolean;
 }
 
 export interface LoginResponse {

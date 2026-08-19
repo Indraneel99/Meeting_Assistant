@@ -153,6 +153,15 @@ class Settings(BaseSettings):
     auth_jwt_audience: str | None = None
     auth_jwt_expiry_seconds: int = 3600
     auth_login_allow_dev: bool = False
+    auth_password_login_enabled: bool = True
+    auth_google_login_enabled: bool = False
+    auth_google_login_client_id: str | None = None
+    auth_google_login_client_secret: str | None = None
+    auth_google_login_client_secret_file: str | None = None
+    auth_google_login_redirect_base: str = "http://127.0.0.1:8000"
+    auth_rate_limit_register: str = "10/hour"
+    auth_rate_limit_login: str = "20/minute"
+    auth_rate_limit_google_callback: str = "30/minute"
 
     # --- Approval locking ---
     approval_lock_ttl_seconds: int = 120
@@ -227,6 +236,7 @@ class Settings(BaseSettings):
         self._apply_file_override("asr_openai_api_key", self.asr_openai_api_key_file)
         self._apply_file_override("auth_api_keys", self.auth_api_keys_file)
         self._apply_file_override("auth_jwt_secret", self.auth_jwt_secret_file)
+        self._apply_file_override("auth_google_login_client_secret", self.auth_google_login_client_secret_file)
         self._apply_file_override("integrations_encryption_key", self.integrations_encryption_key_file)
         self._apply_file_override("slack_oauth_client_secret", self.slack_oauth_client_secret_file)
         self._apply_file_override("google_oauth_client_secret", self.google_oauth_client_secret_file)

@@ -80,6 +80,8 @@ Read:
 | **8** | Hardening          | Auth, structlog, OTEL, `/ready`, slowapi, ruff/mypy/CI                                                  |
 | **9–12** | Prod tools + frontend + security | Live Slack/SendGrid/Calendar, Vite frontend, workflow scoping | ✅ v1 deploy-level tools |
 | **13** | User integrations  | `user_integrations`, OAuth connect, Settings UI, `UserToolProviderFactory`, app-branded outbound identity | ✅ complete |
+| **14** | Pub/Sub worker     | `PubSubBatchJobQueue`, push handler, scale-to-zero worker on GCP | ✅ complete |
+| **15** | User login UI      | Email/password + Google Sign-In; remove browser API-key UX | ✅ complete |
 
 
 ---
@@ -191,6 +193,24 @@ Deploy-level secrets (SendGrid API key, Slack app client_id/secret, assistant ca
 **Rationale:** v1 env-only tools work for single-tenant GCP; multi-user product requires per-user channel/recipient/calendar prefs.  
 **Impact:** `ToolExecutor.execute()` loads meeting owner → factory → provider instance or `integration_not_connected`. Existing `ToolProvider` protocol unchanged. v1 deploy-level providers remain as optional org fallback when user has not connected.
 
+### ADR-17: Login auth vs integrations OAuth (Phase 15)
+
+**Decision:** User **login** (who you are) is separate from **integrations OAuth** (what the app may do on your behalf). Login supports email+password and Google Sign-In (`openid`, `email`, `profile`). Integrations OAuth (Phase 13) keeps existing scopes — e.g. Google Calendar **read** for availability — stored in `user_integrations`, not mixed with login sessions.
+
+**Rationale:** Browser users should not paste API keys from Secret Manager. Google login proves identity; integrations Google connect grants calendar/Slack permissions later in Settings. Separate OAuth clients (or clearly separate redirect paths/scopes) avoid consent-screen confusion and token misuse.
+
+**Impact:**
+
+| Concern | Login (Phase 15) | Integrations (Phase 13) |
+| ------- | ---------------- | ------------------------ |
+| Purpose | Authenticate user → JWT | Authorize tool actions |
+| Google scopes | `openid email profile` | Calendar read, etc. |
+| Storage | `user_auth_identities` or users.password_hash | `user_integrations` encrypted tokens |
+| Frontend | `/login`, Sign in with Google | Settings → Integrations |
+| M2M / ops | `X-API-Key` in Secret Manager (Postman, scripts) | Unchanged |
+
+JWT `sub` continues to map to `users.external_id` for `assert_user_scope` and batch ownership.
+
 ---
 
 ## Adapter matrix (config → implementation)
@@ -209,7 +229,7 @@ Deploy-level secrets (SendGrid API key, Slack app client_id/secret, assistant ca
 | ASR              | `ASR_PROVIDER`          | openai (manual text ok) | openai + upload/S3         |
 | Planner          | `LLM_PROVIDER`          | heuristic fallback      | openai                     |
 | Query            | `QUERY_PROVIDER`        | heuristic               | openai                     |
-| Auth             | `AUTH_ENABLED`          | false                   | api_key or jwt             |
+| Auth             | `AUTH_ENABLED`          | false                   | JWT (email/Google login); API key for ops/M2M |
 
 ### Tool outbound identity (deploy fallback + per-user)
 
@@ -230,7 +250,7 @@ Deploy-level `*_PROVIDER` env vars in `services/tools/factory.py` remain as org 
 
 | Group       | Tables                                                                       | Notes                             |
 | ----------- | ---------------------------------------------------------------------------- | --------------------------------- |
-| Identity    | `users`                                                                      | `external_id` tenant key          |
+| Identity    | `users`, `user_auth_identities` *(Phase 15)*                               | `external_id` tenant key; login methods |
 | Integrations | `user_integrations`                                                       | OAuth tokens (encrypted), prefs   |
 | Content     | `meetings`, `meeting_chunks`, `transcript_artifacts`, `transcript_segments`  | Chunks carry `chunk_embedding`    |
 | Agent audit | `workflow_runs`, `agent_steps`, `tool_executions`, `tool_execution_attempts` | Idempotency + retries             |
@@ -255,6 +275,19 @@ Deploy-level `*_PROVIDER` env vars in `services/tools/factory.py` remain as org 
 
 Unique constraint: `(user_id, provider, provider_account_id)`.
 
+### `user_auth_identities` *(Phase 15)*
+
+| Column | Type | Notes |
+| ------ | ---- | ----- |
+| `id` | int PK | |
+| `user_id` | FK → `users.id` | Owner |
+| `provider` | enum | `email_password`, `google` |
+| `provider_subject` | string | Google `sub` or normalized email |
+| `password_hash` | string | Nullable; only for `email_password` |
+| `metadata_json` | json | e.g. `{ "name": "Alice" }` from Google profile |
+| `created_at`, `updated_at` | timestamptz | |
+
+Unique constraint: `(provider, provider_subject)`. Link Google login to existing email account when emails match (explicit merge rules in AuthService).
 
 **Vectors:** `meetings.summary_embedding`, `meeting_chunks.chunk_embedding`, `decisions.topic_embedding` — all via `EmbeddingVector`.
 
@@ -278,7 +311,11 @@ Unique constraint: `(user_id, provider, provider_account_id)`.
 | GET    | `/api/v1/meetings/{id}/tasks`           | —     | Per meeting              |
 | POST   | `/api/v1/query`                         | 7     | RAG + citations          |
 | GET    | `/admin/approvals/{id}`                 | 5     | HTML approve UI (legacy; frontend inbox preferred) |
-| POST   | `/api/v1/auth/login`                    | 13    | API key → JWT exchange (or dev credentials) |
+| POST   | `/api/v1/auth/login`                    | 13    | Legacy API-key → JWT (ops/Postman; superseded for browser by Phase 15) |
+| POST   | `/api/v1/auth/register`                 | 15    | Email + password sign-up |
+| POST   | `/api/v1/auth/login/email`              | 15    | Email + password sign-in → JWT |
+| GET    | `/api/v1/auth/google/connect`           | 15    | Start Google login OAuth |
+| GET    | `/api/v1/auth/google/callback`          | 15    | Google login callback → JWT + redirect |
 | GET    | `/api/v1/auth/config`                   | 13    | Auth mode flags for frontend |
 | GET    | `/api/v1/auth/me`                       | 13    | Current session (Bearer JWT or API key) |
 | GET    | `/api/v1/integrations`                  | 13    | List connected integrations for current user |
@@ -312,6 +349,21 @@ Batch ingest (meeting.user_id)
 
 **Authorization vs identity:** Connecting Slack grants the app permission to post in selected channels; messages always show the **Meeting Assistant** bot name and icon — not the user's Slack profile.
 
+---
+
+## User login flow (Phase 15)
+
+```
+User opens /login
+  → Email + password: POST /auth/register or POST /auth/login/email → JWT
+  → Google: GET /auth/google/connect → Google consent (profile only)
+       → /auth/google/callback → link/create user → JWT → redirect frontend
+  → Frontend stores Bearer token; API calls use Authorization header
+  → JWT sub = users.external_id → batch/meetings/workflows scoped via assert_user_scope
+
+Ops / Postman: X-API-Key from Secret Manager (no browser UI)
+Integrations (post-login): Settings → connect Slack/Google calendar (Phase 13, separate OAuth)
+```
 
 ---
 
@@ -328,6 +380,7 @@ Batch ingest (meeting.user_id)
 - `GET /meetings/{id}/tasks` lacks user scoping (IDOR gap for multi-tenant — other retrieval routes are scoped).
 - Jira live integration deferred (`tool-jira-live` in `features.json`).
 - Real-time ASR streaming is a v2 candidate (`realtime-asr-streaming` in `features.json`).
+- Browser login uses email/password + Google Sign-In (Phase 15). Legacy API-key exchange remains for ops/Postman only.
 
 ---
 
@@ -356,10 +409,11 @@ Batch ingest (meeting.user_id)
 | `src/meeting_assistant/services/integrations/service.py` | OAuth connect, token storage, settings |
 | `src/meeting_assistant/api/routes/integrations.py` | Integrations HTTP API |
 | `src/meeting_assistant/api/routes/auth_routes.py` | Login / session endpoints |
+| `src/meeting_assistant/services/auth.py` | JWT issue, login/register logic *(Phase 15)* |
 | `src/meeting_assistant/services/stale_workflows.py` | Stale workflow ops monitor |
 | `src/meeting_assistant/services/failed_tools.py` | Failed tool ops monitor |
 | `src/meeting_assistant/api/app.py`                | HTTP envelope (auth, logs, limits) |
-| `migrations/versions/`                            | Schema contract (0001–0005) |
+| `migrations/versions/`                            | Schema contract (0001–0005; 0006 auth Phase 15) |
 
 
 ---
@@ -394,6 +448,13 @@ export MEETING_ASSISTANT_INTEGRATIONS_ENCRYPTION_KEY="..."
 export MEETING_ASSISTANT_INTEGRATIONS_OAUTH_REDIRECT_BASE="https://your-api.run.app"
 export MEETING_ASSISTANT_SLACK_OAUTH_CLIENT_ID="..."
 export MEETING_ASSISTANT_GOOGLE_OAUTH_CLIENT_ID="..."
+
+# User login (Phase 15 — separate from integrations Google client)
+export MEETING_ASSISTANT_AUTH_PASSWORD_LOGIN_ENABLED="true"
+export MEETING_ASSISTANT_AUTH_GOOGLE_LOGIN_ENABLED="true"
+export MEETING_ASSISTANT_AUTH_GOOGLE_LOGIN_CLIENT_ID="..."
+export MEETING_ASSISTANT_AUTH_GOOGLE_LOGIN_CLIENT_SECRET="..."
+export MEETING_ASSISTANT_AUTH_GOOGLE_LOGIN_REDIRECT_BASE="https://your-api.run.app"
 ```
 
 Verify: `curl /ready` → `ready`; batch → approval → approve → `done`; `POST /query` returns citations.

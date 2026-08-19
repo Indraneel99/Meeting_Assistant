@@ -26,3 +26,20 @@ class SessionResponse(BaseModel):
 class AuthConfigResponse(BaseModel):
     auth_enabled: bool
     login_allow_dev: bool
+    password_login_enabled: bool
+    google_login_enabled: bool
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    display_name: str | None = Field(default=None, max_length=255)
+
+
+class GoogleConnectResponse(BaseModel):
+    authorize_url: str
+
+
+class EmailLoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1)

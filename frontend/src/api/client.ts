@@ -237,6 +237,53 @@ export async function login(
   return (await response.json()) as LoginResponse;
 }
 
+export async function registerAccount(
+  baseUrl: string,
+  payload: {
+    email: string;
+    password: string;
+    display_name?: string;
+  },
+): Promise<LoginResponse> {
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new ApiClientError(await parseError(response), response.status);
+  }
+  return (await response.json()) as LoginResponse;
+}
+
+export async function loginEmail(
+  baseUrl: string,
+  payload: {
+    email: string;
+    password: string;
+  },
+): Promise<LoginResponse> {
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/auth/login/email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new ApiClientError(await parseError(response), response.status);
+  }
+  return (await response.json()) as LoginResponse;
+}
+
+export async function getGoogleConnectUrl(baseUrl: string, frontendRedirect: string): Promise<string> {
+  const params = new URLSearchParams({ frontend_redirect: frontendRedirect });
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/auth/google/connect?${params.toString()}`);
+  if (!response.ok) {
+    throw new ApiClientError(await parseError(response), response.status);
+  }
+  const payload = (await response.json()) as { authorize_url: string };
+  return payload.authorize_url;
+}
+
 export async function getSession(config: ApiConfig): Promise<SessionResponse> {
   return request(config, "/api/v1/auth/me");
 }

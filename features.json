@@ -509,6 +509,54 @@
       "status": "pass",
       "evidence": "check_worker_health pubsub branch; build_readiness_report uses check_worker_health; Makefile READINESS_CHECK_WORKER=false + worker READINESS_CHECK_REDIS=false when pubsub; ARCHITECTURE.md Phase 14; test_worker_readiness.py (3 pubsub tests) + test_readiness.py + test_deploy_pubsub.py; ruff pass",
       "testedAt": "2026-08-19"
+    },
+    {
+      "id": "auth-identity-schema",
+      "name": "User Auth Identity Schema",
+      "description": "Alembic migration for first-class user credentials: extend users or add user_auth_identities table linking a user to login methods (email_password, google). Store password_hash (bcrypt/argon2) for email login; store Google sub + optional profile metadata for OAuth login. Unique constraints on email and (provider, provider_subject). external_id remains stable tenant key for API scoping and integrations. See ARCHITECTURE.md ADR-17.",
+      "status": "pass",
+      "evidence": "migration 0006_user_auth_identities; UserAuthIdentity ORM + AuthProvider enum; Repository create/link/lookup methods; generate_user_external_id + normalize_auth_email; test_user_auth_identities.py (6 tests); test_migrations.py updated; ruff pass",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "auth-email-password",
+      "name": "Email + Password Register and Login",
+      "description": "POST /api/v1/auth/register (email, password, optional display name) and POST /api/v1/auth/login/email (email, password). Hash passwords server-side; validate strength and normalize email. On success issue existing JWT access_token via AuthService.issue_access_token. GET /auth/config exposes password_login_enabled. Deprecate browser API-key login (keep X-API-Key for Postman/ops/M2M only). Tests: test_auth_password.py.",
+      "status": "pass",
+      "evidence": "bcrypt password hashing; POST /auth/register + /auth/login/email; AuthConfigResponse password_login_enabled; legacy POST /auth/login unchanged; test_auth_password.py (6 tests); ruff pass",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "auth-google-login",
+      "name": "Sign in with Google (Login OAuth)",
+      "description": "Separate OAuth flow from /integrations/google (login vs calendar scopes). GET /api/v1/auth/google/connect returns authorize URL; GET /api/v1/auth/google/callback exchanges code, verifies id_token, link-or-create user by Google sub/email, issue JWT, redirect to frontend. Signed OAuth state (reuse oauth_state pattern). Config: AUTH_GOOGLE_LOGIN_CLIENT_ID/SECRET, redirect base. Do not store login tokens in user_integrations — login identity only. Tests with mocked Google token exchange.",
+      "status": "pass",
+      "evidence": "GoogleLoginOAuthClient (openid email profile); GET /auth/google/connect + /callback; link-or-create via user_auth_identities; JWT in URL fragment redirect; test_auth_google_login.py (4 tests); ruff pass",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "frontend-auth-pages",
+      "name": "Frontend Login and Register Pages",
+      "description": "Replace sidebar AuthPanel API-key form with dedicated /login and /register routes. Email+password forms, 'Sign in with Google' button (redirect to /auth/google/connect), protected app routes redirect unauthenticated users to /login. Remove API key and manual user_external_id/email fields from default UX. Keep Bearer JWT in localStorage or httpOnly cookie per implementation. Sign out clears session. Depends on auth-email-password and auth-google-login.",
+      "status": "pass",
+      "evidence": "LoginPage + RegisterPage at /login /register; ProtectedRoute guard; UserSessionBar replaces AuthPanel; Google OAuth fragment handling; npm run build pass; ConfigContext auth flags",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "deploy-auth-gcp",
+      "name": "GCP Auth Deploy (Google Login OAuth)",
+      "description": "Google Cloud Console OAuth client for user login (distinct from integrations Google client or separate redirect URIs). Authorized redirect: API /api/v1/auth/google/callback; JS origin: frontend URL. Secrets in Secret Manager: AUTH_GOOGLE_LOGIN_CLIENT_ID/SECRET. Update deploy/.env.prod.example and Makefile. Document that meeting-assistant-api-keys Secret Manager entries are ops/Postman only — not end-user browser login. Optional: AUTH_LOGIN_ALLOW_DEV=false in prod.",
+      "status": "pass",
+      "evidence": "deploy/.env.prod.example Phase 15 login OAuth vars + ops-only API key note; Makefile AUTH_* login env + GCP_AUTH_GOOGLE_LOGIN_CLIENT_SECRET wiring; test_deploy_auth.py (2 tests); ruff pass",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "security-auth-login-limits",
+      "name": "Login and Register Rate Limits",
+      "description": "Apply slowapi rate limits to POST /auth/register, POST /auth/login/email, and /auth/google/callback keyed by IP + email where applicable. Return 429 on brute-force patterns. Configurable limits in Settings. Tests in test_rate_limit.py or test_auth_password.py.",
+      "status": "pass",
+      "evidence": "slowapi limits on register/login/email + google/callback with auth_ip_rate_limit_key; auth_rate_limit_* Settings; test_auth_password.py rate limit 429 test; ruff pass",
+      "testedAt": "2026-08-19"
     }
   ]
 }

@@ -12,6 +12,7 @@ from meeting_assistant.db.models import (
     AgentStep,
     ApprovalRequest,
     ApprovalRequestStatus,
+    AuthProvider,
     Decision,
     IntegrationProvider,
     IntegrationStatus,
@@ -24,11 +25,13 @@ from meeting_assistant.db.models import (
     TranscriptArtifact,
     TranscriptSegment,
     User,
+    UserAuthIdentity,
     UserIntegration,
     WorkflowRun,
     WorkflowStatus,
 )
 from meeting_assistant.services.asr import TranscriptDocument
+from meeting_assistant.services.auth_identity import generate_user_external_id, normalize_auth_email
 from meeting_assistant.services.token_encryption import TokenEncryptor
 
 SessionFactory = Callable[[], Session]
@@ -472,6 +475,92 @@ class Repository:
     def get_user_by_external_id(self, external_id: str) -> User | None:
         with self.session_factory() as session:
             return session.scalar(select(User).where(User.external_id == external_id))
+
+    def get_user_by_email(self, email: str) -> User | None:
+        normalized = normalize_auth_email(email)
+        with self.session_factory() as session:
+            return session.scalar(select(User).where(User.email == normalized))
+
+    def get_auth_identity(
+        self,
+        provider: AuthProvider,
+        provider_subject: str,
+    ) -> UserAuthIdentity | None:
+        with self.session_factory() as session:
+            return session.scalar(
+                select(UserAuthIdentity).where(
+                    UserAuthIdentity.provider == provider,
+                    UserAuthIdentity.provider_subject == provider_subject,
+                )
+            )
+
+    def list_auth_identities_for_user(self, user_id: int) -> list[UserAuthIdentity]:
+        with self.session_factory() as session:
+            return list(
+                session.scalars(
+                    select(UserAuthIdentity)
+                    .where(UserAuthIdentity.user_id == user_id)
+                    .order_by(UserAuthIdentity.provider, UserAuthIdentity.provider_subject)
+                )
+            )
+
+    def create_user_with_auth_identity(
+        self,
+        *,
+        email: str,
+        provider: AuthProvider,
+        provider_subject: str,
+        password_hash: str | None = None,
+        metadata_json: dict[str, object] | None = None,
+        external_id: str | None = None,
+    ) -> tuple[User, UserAuthIdentity]:
+        normalized_email = normalize_auth_email(email)
+        with self.session_factory() as session:
+            user = User(
+                external_id=external_id or generate_user_external_id(),
+                email=normalized_email,
+            )
+            session.add(user)
+            session.flush()
+
+            identity = UserAuthIdentity(
+                user_id=user.id,
+                provider=provider,
+                provider_subject=provider_subject,
+                password_hash=password_hash,
+                metadata_json=metadata_json or {},
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+            session.add(identity)
+            session.commit()
+            session.refresh(user)
+            session.refresh(identity)
+            return user, identity
+
+    def link_auth_identity_to_user(
+        self,
+        user_id: int,
+        *,
+        provider: AuthProvider,
+        provider_subject: str,
+        password_hash: str | None = None,
+        metadata_json: dict[str, object] | None = None,
+    ) -> UserAuthIdentity:
+        with self.session_factory() as session:
+            identity = UserAuthIdentity(
+                user_id=user_id,
+                provider=provider,
+                provider_subject=provider_subject,
+                password_hash=password_hash,
+                metadata_json=metadata_json or {},
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+            session.add(identity)
+            session.commit()
+            session.refresh(identity)
+            return identity
 
     def get_meetings_for_user(self, user_id: int) -> list[Meeting]:
         with self.session_factory() as session:

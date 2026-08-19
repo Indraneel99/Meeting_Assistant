@@ -48,3 +48,27 @@ def verify_oauth_state(settings: Settings, state: str) -> dict[str, object]:
     if not isinstance(provider, str) or not provider:
         raise ValueError("OAuth state is missing provider.")
     return payload
+
+
+def issue_google_login_state(
+    settings: Settings,
+    *,
+    frontend_redirect: str | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "purpose": "google_login",
+        "exp": datetime.now(UTC) + _STATE_TTL,
+    }
+    if frontend_redirect:
+        payload["frontend_redirect"] = frontend_redirect
+    return jwt.encode(payload, _state_secret(settings), algorithm="HS256")
+
+
+def verify_google_login_state(settings: Settings, state: str) -> dict[str, object]:
+    try:
+        payload = jwt.decode(state, _state_secret(settings), algorithms=["HS256"])
+    except jwt.PyJWTError as exc:
+        raise ValueError("Invalid or expired OAuth state.") from exc
+    if payload.get("purpose") != "google_login":
+        raise ValueError("OAuth state purpose mismatch.")
+    return payload

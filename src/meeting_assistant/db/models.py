@@ -50,6 +50,11 @@ class ApprovalRequestStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class AuthProvider(StrEnum):
+    EMAIL_PASSWORD = "email_password"
+    GOOGLE = "google"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -60,6 +65,25 @@ class User(Base):
 
     meetings: Mapped[list["Meeting"]] = relationship(back_populates="user")
     integrations: Mapped[list["UserIntegration"]] = relationship(back_populates="user")
+    auth_identities: Mapped[list["UserAuthIdentity"]] = relationship(back_populates="user")
+
+
+class UserAuthIdentity(Base):
+    __tablename__ = "user_auth_identities"
+    __table_args__ = (UniqueConstraint("provider", "provider_subject"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[AuthProvider] = mapped_column(
+        str_enum(AuthProvider, name="authprovider"),
+    )
+    provider_subject: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="auth_identities")
 
 
 class IntegrationProvider(StrEnum):

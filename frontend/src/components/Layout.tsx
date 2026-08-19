@@ -1,6 +1,6 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { ActiveWorkflowBanner } from "./ActiveWorkflowBanner";
-import { AuthPanel } from "./AuthPanel";
+import { UserSessionBar } from "./UserSessionBar";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) => (isActive ? "nav-link active" : "nav-link");
 
@@ -35,7 +35,7 @@ export function Layout() {
       </header>
 
       <aside className="sidebar">
-        <AuthPanel />
+        <UserSessionBar />
         <ActiveWorkflowBanner />
       </aside>
 

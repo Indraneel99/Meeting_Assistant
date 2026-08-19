@@ -1,4 +1,5 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { getAuthConfig } from "../api/client";
 import type { ApiConfig } from "../api/types";
 
 const STORAGE_KEY = "meeting-assistant-config";
@@ -32,16 +33,56 @@ interface ConfigContextValue {
   updateConfig: (patch: Partial<ApiConfig>) => void;
   clearSession: () => void;
   isAuthenticated: boolean;
+  authEnabled: boolean;
+  passwordLoginEnabled: boolean;
+  googleLoginEnabled: boolean;
+  authLoading: boolean;
 }
 
 const ConfigContext = createContext<ConfigContextValue | null>(null);
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<ApiConfig>(loadConfig);
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(true);
+  const [googleLoginEnabled, setGoogleLoginEnabled] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAuthConfig(config.baseUrl)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setAuthEnabled(result.auth_enabled);
+        setPasswordLoginEnabled(result.password_login_enabled);
+        setGoogleLoginEnabled(result.google_login_enabled);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAuthEnabled(false);
+          setPasswordLoginEnabled(true);
+          setGoogleLoginEnabled(false);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.baseUrl]);
 
   const value = useMemo(
     () => ({
       config,
+      authEnabled,
+      passwordLoginEnabled,
+      googleLoginEnabled,
+      authLoading,
       isAuthenticated: Boolean(config.accessToken),
       updateConfig: (patch: Partial<ApiConfig>) => {
         setConfig((current) => {
@@ -58,7 +99,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         });
       },
     }),
-    [config],
+    [authEnabled, authLoading, config, googleLoginEnabled, passwordLoginEnabled],
   );
 
   return <ConfigContext.Provider value={value}>{children}</ConfigContext.Provider>;
