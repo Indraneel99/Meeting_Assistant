@@ -14,8 +14,6 @@ def arq_health_check_key(settings: Settings) -> str:
 
 
 def check_arq_worker_health(settings: Settings) -> tuple[str, str | None]:
-    if settings.batch_processing_mode != "async" or settings.job_queue_provider != "arq":
-        return "skipped", None
     if not settings.readiness_check_worker:
         return "skipped", None
 
@@ -28,3 +26,16 @@ def check_arq_worker_health(settings: Settings) -> tuple[str, str | None]:
         return "ok", value
     except Exception:
         return "error", "worker heartbeat check failed"
+
+
+def check_worker_health(settings: Settings) -> tuple[str, str | None]:
+    """Readiness worker probe: ARQ heartbeat in Redis, or skipped for Pub/Sub push workers."""
+    if not settings.readiness_check_worker:
+        return "skipped", None
+    if settings.batch_processing_mode != "async":
+        return "skipped", None
+    if settings.job_queue_provider == "pubsub":
+        return "skipped", "pubsub push worker"
+    if settings.job_queue_provider != "arq":
+        return "skipped", None
+    return check_arq_worker_health(settings)

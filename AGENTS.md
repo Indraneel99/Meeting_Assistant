@@ -6,7 +6,7 @@
 
 Single-service Python **Meeting Assistant** API (modular monolith) plus a **Vite+React frontend** in `frontend/`. Default dev stack: SQLite + in-process queue/embeddings + heuristic planner + stub tools.
 
-**Phase 13 (planned):** Per-user integrations — users connect Slack workspace, email notification prefs, and calendar via OAuth/settings UI. Outbound actions use **Meeting Assistant app identity** (Slack bot, branded email, assistant calendar), not user impersonation. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15/16 and [`features.json`](./features.json) `integrations-*` features.
+**Phase 13 (complete):** Per-user integrations — users connect Slack workspace, email notification prefs, and calendar via OAuth/settings UI. Outbound actions use **Meeting Assistant app identity** (Slack bot, branded email, assistant calendar), not user impersonation. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15/16 and [`features.json`](./features.json) `integrations-*` features.
 
 ### Services
 
@@ -66,7 +66,7 @@ After starting the server, POST a batch meeting with `transcript_text` to `/api/
 When `AUTH_ENABLED=true` (set in `deploy/.env.prod`):
 
 - `/health` and `/ready` remain **public** (no key required).
-- All `/api/v1/*` and `/admin/*` routes require **`X-API-Key`** header.
+- All `/api/v1/*` and `/admin/*` routes require **`X-API-Key`** or **`Authorization: Bearer <JWT>`** (from `POST /api/v1/auth/login`).
 - Secret Manager secret `meeting-assistant-api-keys` format: `user_external_id:api_key`  
   Example: `indra:your-postman-secret` (scoped to `user_external_id=indra` in batch requests).
 
@@ -88,7 +88,7 @@ echo -n 'indra:your-postman-secret' | gcloud secrets versions add meeting-assist
 ### Notes
 
 - SQLite DB file defaults to `./meeting_assistant.db` (auto-created on startup).
-- Calendar tool actions return `approval_required`; email tool executes in stub mode — both are expected.
+- Calendar tool actions return `approval_required` in stub mode; live Google Calendar requires approve flow. Email/Slack use stub providers locally; SendGrid/webhook on GCP.
 
 ### Feature development
 

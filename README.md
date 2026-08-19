@@ -1,14 +1,15 @@
 # Meeting Assistant
 
-This repository contains a batch-first meeting assistant scaffold that follows a production-shaped architecture while staying simple enough to iterate locally.
+This repository contains a batch-first meeting assistant with a production-shaped modular monolith architecture and a Vite+React frontend.
 
 ## What is included
 
-- FastAPI service for batch meeting ingestion and retrieval
-- Durable workflow state in Postgres-compatible SQLAlchemy models
+- FastAPI service for batch meeting ingestion, agent tool execution, and retrieval
+- Durable workflow state in Postgres-compatible SQLAlchemy models (SQLite for local dev)
 - Queue, hybrid ASR, planner, tool execution, and embedding abstractions
-- Read-oriented retrieval endpoints that mirror the future real-time query service
-- Lightweight tests for the API and orchestration flow
+- Per-user integrations (Slack, email prefs, Google calendar) with OAuth connect API
+- Vite+React frontend: upload, workflow status, search, RAG query, approvals, integrations settings
+- 170+ pytest tests; CI with ruff, mypy, SQLite suite, and Postgres migration smoke
 
 ## Architecture notes
 
@@ -24,9 +25,9 @@ The current implementation is a modular monolith:
 
 The storage model is compatible with a future Postgres + pgvector deployment. Local development defaults to SQLite, while the vector layer is abstracted so a real pgvector-backed implementation can replace the in-process cosine similarity store.
 
-## User integrations (Phase 13 — planned)
+## User integrations (Phase 13 — complete)
 
-v1 uses **deploy-level** tool credentials (one Slack webhook, SendGrid sender, Google service account for the whole deployment). The multi-user product moves to **per-user connections** with **Meeting Assistant app identity** for outbound actions:
+v1 **deploy-level** tool credentials (one Slack webhook, SendGrid sender, Google service account) remain as org fallback. Multi-user product uses **per-user connections** with **Meeting Assistant app identity** for outbound actions:
 
 | Channel | User connects | Messages appear as |
 |---------|---------------|-------------------|
@@ -34,11 +35,11 @@ v1 uses **deploy-level** tool credentials (one Slack webhook, SendGrid sender, G
 | Email | Notification email preferences | **Meeting Assistant** branded sender via SendGrid |
 | Calendar | Optional Google read; writes via assistant calendar | Invite from **Meeting Assistant** calendar |
 
-Users authorize the app; the app acts with its own visible identity (similar to GitHub Apps / Cursor bot commits). See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15 and [`features.json`](./features.json) Phase 13 features.
+Configure OAuth app credentials in `.env.production.example` (`SLACK_OAUTH_*`, `GOOGLE_OAUTH_*`, `INTEGRATIONS_ENCRYPTION_KEY`). Users manage connections in **Settings → Integrations** in the frontend. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15 and [`features.json`](./features.json) `integrations-*` features.
 
 ## Frontend
 
-A Vite + React app lives in [`frontend/`](./frontend/). Run the API on port 8000, then `cd frontend && npm run dev` for port 5173. Planned: **Settings → Integrations** for connect/disconnect flows.
+A Vite + React app lives in [`frontend/`](./frontend/). Run the API on port 8000, then `cd frontend && npm run dev` for port 5173. Screens: Upload, Workflow status, Search, Ask (RAG), Approvals, and **Settings → Integrations** for connect/disconnect flows. Auth via JWT login (`POST /api/v1/auth/login`) or `X-API-Key` header.
 
 ## Run locally
 
@@ -171,7 +172,7 @@ export MEETING_ASSISTANT_LLM_PROVIDER="openai"
 
 If no LLM API key is configured, the app falls back to the local heuristic planner so you can keep testing offline.
 
-Tool providers default to local stubs for offline development. **v1:** configure one set of credentials per deployment via env vars. **Phase 13:** per-user integrations replace deploy-level Slack/webhook routing; email uses deploy SendGrid with per-user recipient prefs.
+Tool providers default to local stubs for offline development. **Deploy-level** credentials work as org fallback; **per-user integrations** (Phase 13) resolve channels/recipients via `UserToolProviderFactory` when users connect in Settings → Integrations.
 
 ```bash
 # --- v1 deploy-level (single-tenant GCP today) ---
@@ -199,7 +200,7 @@ export MEETING_ASSISTANT_JIRA_API_TOKEN="..."
 export MEETING_ASSISTANT_JIRA_PROJECT_KEY="ENG"
 ```
 
-Phase 13 OAuth app credentials (Slack client_id/secret, Google OAuth client) will be documented in `.env.production.example` when implemented. See `ARCHITECTURE.md` for the integrations API surface.
+Phase 13 OAuth app credentials (Slack `SLACK_OAUTH_*`, Google `GOOGLE_OAUTH_*`, `INTEGRATIONS_ENCRYPTION_KEY`) are documented in `.env.production.example`. See `ARCHITECTURE.md` for the integrations API surface.
 
 Retrieval uses semantic search across meeting summaries, transcript chunks, and decisions. `/query` synthesizes answers with citations from retrieved context. Enable hosted Q&A with:
 
@@ -219,7 +220,7 @@ export MEETING_ASSISTANT_TOOL_EXECUTION_BACKOFF_MODE="background"
 
 ### Production hardening
 
-Auth is disabled by default for local development. Enable API key or JWT protection on `/api/v1/*` and `/admin/*`:
+Auth is disabled by default for local development. Enable API key or JWT protection on `/api/v1/*` and `/admin/*`. The frontend uses `POST /api/v1/auth/login` to exchange an API key for a Bearer JWT.
 
 ```bash
 export MEETING_ASSISTANT_AUTH_ENABLED="true"

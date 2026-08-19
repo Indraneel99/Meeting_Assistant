@@ -1,18 +1,18 @@
 # Meeting Assistant — Progress & Roadmap
 
-Last updated: 2026-07-26
+Last updated: 2026-08-19
 
 ## Executive summary
 
-Meeting Assistant is a **modular monolith** FastAPI backend with a complete batch ingestion → agent → retrieval loop. The core product is **deployed on GCP (Cloud Run)** and verified end-to-end via Postman: batch ingestion runs, the agent plans and executes tools, workflow status updates correctly, and Postgres is populated as expected.
+Meeting Assistant is a **modular monolith** FastAPI backend with a Vite+React frontend. The full batch ingestion → agent → retrieval loop is **deployed on GCP (Cloud Run)** and verified end-to-end: batch ingestion, per-user tool integrations, workflow polling, semantic search, RAG query, and calendar approvals.
 
-What remains for a full production product:
+**62 of 64 features pass** in [`features.json`](./features.json). Remaining work:
 
-2. **User login (JWT)** — replace browser API-key panel with proper sessions.
-3. **Security & ops** — worker health, alerting (approve lock ✅, rate limit by identity ✅).
-3. **Optional:** Jira live integration (deferred), real-time ASR (v2).
+1. **Phase 14 Pub/Sub worker** — complete ✅ (`deploy-pubsub-gcp`, `job-queue-pubsub`, `worker-pubsub-push`, `ops-pubsub-readiness`).
+2. **Jira live integration** — deferred (`tool-jira-live`); wiring exists but is commented out in deploy config.
+3. **Real-time ASR streaming** — v2 candidate (`realtime-asr-streaming`); different product surface from batch-first v1.
 
-Use [`features.json`](./features.json) as the machine-readable source of truth for feature status. Update it when a feature is verified (set `status: "pass"`, add `evidence` and `testedAt`).
+Use [`features.json`](./features.json) as the machine-readable source of truth. Update it when a feature is verified (`status: "pass"`, `evidence`, `testedAt`).
 
 ---
 
@@ -20,47 +20,48 @@ Use [`features.json`](./features.json) as the machine-readable source of truth f
 
 | Area | Status | Notes |
 |------|--------|-------|
-| GCP API (Cloud Run) | ✅ Deployed | Batch, search, query, workflows reachable from Postman |
-| GCP Worker (ARQ) | ✅ Deployed | Async batch pipeline off HTTP thread |
+| GCP API (Cloud Run) | ✅ Deployed | Batch, search, query, workflows, integrations |
+| GCP Worker (Pub/Sub push) | ✅ Deployed | Scale-to-zero; push → `POST /internal/jobs/batch` (Phase 14 complete) |
 | Cloud SQL Postgres | ✅ Running | pgvector migrations applied on startup |
-| Redis / ARQ | ✅ Configured | Upstash `rediss://` for job queue |
-| OpenAI (LLM, embed, ASR, query) | ✅ Configured | Production-shaped env in `.env.production.example` |
+| Redis / ARQ | ✅ Optional | Upstash still used for approval locks; job dispatch via Pub/Sub on GCP |
+| OpenAI (LLM, embed, ASR, query) | ✅ Configured | Production env in `.env.production.example` |
 | GCS audio storage | ✅ Configured | Upload + ASR source reads |
 | Agent loop | ✅ Verified | Plan → tool execute → complete meeting; DB updated |
-| Tool integrations | ✅ v1 deploy-level | Live Slack/SendGrid/Calendar on GCP; Phase 13 → per-user connect + app identity |
-| Auth | ✅ Enabled | Scoped `X-API-Key` + JWT login (`auth-user-login`); frontend Sign in panel |
-| Frontend | ✅ MVP + Integrations | Upload, workflow, search, query, approvals, Settings → Integrations |
-| User integrations | ✅ Phase 13 complete | Schema + OAuth API + Settings UI + per-provider connect + per-user tool factory |
+| Tool integrations | ✅ Live | Slack/SendGrid/Calendar on GCP; per-user OAuth + deploy fallback |
+| Auth | ✅ Enabled | Scoped `X-API-Key` + JWT login; frontend Sign in panel |
+| Frontend | ✅ Complete | Upload, workflow, search, query, approvals, Settings → Integrations |
+| User integrations | ✅ Phase 13 | Schema, OAuth API, Settings UI, `UserToolProviderFactory` |
+| Security & ops | ✅ Complete | Workflow scoping, approve lock, rate limit by identity, OTEL, stale/failed alerts |
 
 ---
 
 ## Architecture phases (build map)
 
-Phases 1–8 from [`ARCHITECTURE.md`](./ARCHITECTURE.md) are **implemented**. The table below maps each phase to deliverables and verification.
+Phases 1–13 from [`ARCHITECTURE.md`](./ARCHITECTURE.md) are **implemented**.
 
 | Phase | Theme | Key deliverables | Verified |
 |-------|-------|------------------|----------|
-| **1** | Data layer | Alembic, psycopg pool, migration `0001`, 12 ORM tables | ✅ CI + GCP |
+| **1** | Data layer | Alembic, psycopg pool, migration `0001`, 12+ ORM tables | ✅ CI + GCP |
 | **2** | Summary embeddings | `EmbeddingIndex`, pgvector `0002`, meeting search | ✅ Tests + GCP |
 | **3** | Async | ARQ worker, `submit` vs `run_batch_workflow`, `GET /workflows/{id}` | ✅ GCP + Postman |
 | **4** | ASR | OpenAI adapter, upload store (local/S3/GCS), `POST /batch/upload` | ✅ Tests; GCS on GCP |
-| **5** | Approvals | `approval_requests`, `ApprovalService`, `AgentRuntime.resume`, admin HTML | ✅ Tests; stub calendar |
-| **6** | Tools | `services/tools/` package, SendGrid/Google/Slack/Jira providers | ✅ Live on GCP (v1 deploy-level) |
-| **7** | Retrieval | Chunk/decision embeddings `0004`, RAG `QueryAnswerer`, cursor pagination | ✅ Tests + Postman |
+| **5** | Approvals | `approval_requests`, `ApprovalService`, `AgentRuntime.resume` | ✅ Tests + frontend inbox |
+| **6** | Tools | `services/tools/` package, SendGrid/Google/Slack providers | ✅ Live on GCP |
+| **7** | Retrieval | Chunk/decision embeddings `0004`, RAG `QueryAnswerer`, cursor pagination | ✅ Tests + frontend |
 | **8** | Hardening | Auth, structlog, `/ready`, slowapi, ruff/mypy/CI | ✅ |
-| **9–12** | Tools + frontend + security | Live integrations, Vite UI, workflow scoping | ✅ |
-| **13** | User integrations | `user_integrations`, OAuth API, Settings UI, per-user tool factory, app-branded outbound | ✅ |
+| **9–12** | Tools + frontend + security | Live integrations, Vite UI, workflow scoping, ops monitors | ✅ |
+| **14** | Pub/Sub worker | Pub/Sub publish, push handler, scale-to-zero worker deploy | ✅ |
 
 ---
 
-## Adapter matrix (v1 deploy-level → Phase 13 per-user)
+## Tool wiring (deploy fallback + per-user)
 
-| Concern | v1 (GCP today) | Phase 13 target |
-|---------|----------------|-----------------|
-| Slack | One webhook/bot for deploy | User connects workspace; **Meeting Assistant bot** posts to chosen channels |
+| Channel | Deploy fallback | Per-user (when connected) |
+|---------|-----------------|---------------------------|
+| Slack | One webhook/bot for deploy | User workspace OAuth; **Meeting Assistant bot** in chosen channels |
 | Email | SendGrid from one sender | Branded **Meeting Assistant** From; per-user notification addresses |
 | Calendar | Service account calendar | **Assistant calendar** organizer; user invited as attendee |
-| Tools wiring | `build_tool_providers(settings)` env singleton | `UserToolProviderFactory(meeting.user_id)` |
+| Resolution | `build_tool_providers(settings)` | `UserToolProviderFactory.for_user(meeting.user_id)` |
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15 (authorize user, act as app) and ADR-16 (per-user factory).
 
@@ -68,123 +69,111 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) ADR-15 (authorize user, act as app) a
 
 ## Test & CI coverage
 
-- **169 tests** across 31 modules (`uv run pytest`).
+- **170 tests** across 31 modules (`uv run pytest`).
 - **CI:** ruff, mypy, full SQLite suite; Postgres smoke (migrations + embeddings).
-- **Gaps:** No live integration tests against SendGrid/Google/Slack/Jira; no full Postgres E2E; no frontend tests.
+- **Gaps:** No live integration tests against SendGrid/Google/Slack; no full Postgres E2E; no frontend tests; `GET /meetings/{id}/tasks` lacks user scoping.
 
 Canonical local flow: `tests/test_api.py::test_batch_ingestion_and_retrieval`.
 
 ---
 
-## Roadmap to end-to-end product
+## Known gaps (see ARCHITECTURE.md)
 
-### Phase 13 — User integrations (complete)
-
-**Goal:** Each user connects the channels they want; agent actions appear as **Meeting Assistant**, not as the user.
-
-**Principle (ADR-15):** User **authorizes** → app **acts** with its own identity (like Cursor pushing as `cursor[bot]`).
-
-| Integration | User connects | Outbound identity | Feature id |
-|-------------|---------------|-------------------|------------|
-| Slack | Workspace OAuth install | Meeting Assistant **bot** | `integrations-slack-workspace` |
-| Email | Notification email prefs | `Meeting Assistant <notifications@domain>` | `integrations-email-preferences` |
-| Calendar | Optional Google read; assistant writes | Invite from **assistant calendar** | `integrations-calendar-assistant` |
-
-**Build order:**
-
-1. `integrations-schema` — `user_integrations` migration + encryption ✅
-2. `integrations-oauth-api` — connect / callback / disconnect / settings ✅
-3. `integrations-settings-ui` — frontend Integrations page ✅
-4. `integrations-slack-workspace` ✅
-5. `integrations-email-preferences` ✅
-6. `integrations-calendar-assistant` ✅
-7. `integrations-per-user-tools` — planner `available_tools` + `integration_not_connected` ✅
-8. `auth-user-login` — JWT sessions (replace API key in browser) ✅
+- `GET /meetings/{id}/tasks` — no `assert_user_scope` (IDOR for multi-tenant).
+- Transcript queue ack/nack unused; background tool backoff blocks executor thread.
+- Jira live integration deferred.
+- Real-time ASR — v2.
 
 ---
 
-### Phase 9 — Real tool integrations (v1 complete)
+## Phase 14 — Pub/Sub triggered worker (handoff)
 
-**Goal:** Agent actions reach real external systems in production.
+**Goal:** Stop paying for an always-on Cloud Run worker. Today the worker runs ARQ against Redis with **minimum instances = 1** so jobs are picked up immediately. Replace the Redis/ARQ **job dispatch** path with **Cloud Pub/Sub push → Cloud Run worker HTTP handler**, so the worker scales to **zero** and wakes only when a batch job is published.
 
-| Tool | Config | Credentials needed | Approval | Status |
-|------|--------|-------------------|----------|--------|
-| Slack | `SLACK_PROVIDER=webhook` or `api` | Webhook URL or Bot token + channel | No | ✅ Live on GCP |
-| Email | `EMAIL_PROVIDER=sendgrid` | SendGrid API key, verified sender | No | ✅ Live on GCP |
-| Calendar | `CALENDAR_PROVIDER=google` | Service account or OAuth; `uv sync --extra tools` | Yes (two-phase) | ✅ Live on GCP |
-| Jira | `JIRA_PROVIDER=rest` | Jira Cloud URL, email, API token, project key | No | Commented out / deferred |
-| Auth | `AUTH_ENABLED=true` | API keys in Secret Manager (`user:key` format) | No | ✅ Live on GCP |
+**Current flow (GCP):**
 
-**Tasks:**
+```
+POST /batch (202) → ArqBatchJobQueue → Redis → always-on ARQ worker → run_batch_workflow
+```
 
-1. Create Slack app / webhook; add secrets to GCP Secret Manager.
-2. SendGrid: verify sender domain; set `MEETING_ASSISTANT_EMAIL_SENDGRID_*` env vars.
-3. Google Calendar: service account with calendar scope; share target calendar.
-4. Jira: API token; test `jira.create_issue` idempotency labels.
-5. Run batch meetings with transcript text that triggers each tool keyword.
-6. Update `features.json` per tool when live-verified.
+**Target flow (GCP):**
 
-**Acceptance:** Postman batch → workflow `done` or `awaiting_approval` → real Slack message / email / calendar hold / Jira ticket visible in target system.
+```
+POST /batch (202) → PubSubBatchJobQueue → Pub/Sub topic
+                                              ↓ push (per message)
+                         Cloud Run worker (min-instances=0) POST /internal/jobs/batch
+                                              → run_batch_workflow → 200 ack
+```
 
----
+**Keep unchanged:** `BatchJobQueue` protocol (ADR-2), `submit_batch_meeting` / `run_batch_workflow` split (ADR-6), `workflow_runs` as job record (ADR-7). Local dev and Docker Compose can keep `JOB_QUEUE_PROVIDER=arq` + Redis.
 
-### Phase 10 — Frontend
+### Feature ids (implement in order — one at a time per AGENTS.md)
 
-**Goal:** Product UI for ingest, status, search, query, and approvals (replace Postman + minimal admin HTML).
+| Order | Feature id | Deliverable |
+|-------|------------|-------------|
+| 1 | `deploy-pubsub-gcp` | Topic, push subscription, IAM, Makefile deploy vars; worker `min-instances=0` |
+| 2 | `job-queue-pubsub` | `PubSubBatchJobQueue` + `JOB_QUEUE_PROVIDER=pubsub` in bootstrap |
+| 3 | `worker-pubsub-push` | HTTP push handler on worker; replace `arq` entrypoint when pubsub mode |
+| 4 | `ops-pubsub-readiness` | Readiness checks without ARQ heartbeat; tests |
 
-**Status:** MVP scaffold complete in `frontend/` (Vite + React + TypeScript). Run API on `:8000`, then `cd frontend && npm install && npm run dev` for `:5173`. CORS enabled via `MEETING_ASSISTANT_CORS_ORIGINS`. Search/Query screens include chunk search, cursor pagination, and RAG citations with retrieved context.
+### Implementation checklist
 
-**Recommended stack (fits current API):**
+#### 1. `deploy-pubsub-gcp`
 
-- **Framework:** Next.js or Vite + React (TypeScript).
-- **Auth:** `X-API-Key` header (match `MEETING_ASSISTANT_AUTH_API_KEYS`) or JWT if you add a login service later.
-- **API client:** OpenAPI-generated client from `/openapi.json`.
+- [x] Add env vars to `deploy/.env.prod.example`: `PUBSUB_TOPIC`, `PUBSUB_PROJECT`, `JOB_QUEUE_PROVIDER=pubsub` (GCP prod).
+- [x] Makefile targets: create/update Pub/Sub topic + **push subscription** (endpoint = worker Cloud Run URL + push path).
+- [x] IAM: API Cloud Run SA → `roles/pubsub.publisher`; Pub/Sub push SA → `roles/run.invoker` on worker service.
+- [x] `deploy-worker`: set `--min-instances=0` when `JOB_QUEUE_PROVIDER=pubsub` (ARQ keeps `min-instances=1`).
+- [x] Document rollback: flip `JOB_QUEUE_PROVIDER` back to `arq` and restore min-instances if needed.
+- [ ] Optional: remove or downsize Upstash Redis if only used for ARQ job queue (keep if transcript queue still uses Redis).
 
-**MVP screens:**
+#### 2. `job-queue-pubsub`
 
-| Screen | API endpoints |
-|--------|---------------|
-| Upload / paste transcript | `POST /batch`, `POST /batch/upload` |
-| Workflow status | `GET /workflows/{id}` |
-| Approval inbox | `GET /workflows/{id}/approvals`, `POST /approvals/{id}/approve\|reject` |
-| Meeting search | `GET /meetings/search` |
-| Ask a question (RAG) | `POST /query` |
-| Meeting detail | `GET /meetings/{id}/tasks`, decisions via search |
+- [x] New class `PubSubBatchJobQueue` in `src/meeting_assistant/services/jobs.py`.
+- [x] Publish JSON message: `{ "workflow_run_id": int, "payload": dict }` + W3C trace context in attributes (match `inject_trace_context`).
+- [x] Extend `build_batch_job_queue()` for `job_queue_provider == "pubsub"`.
+- [x] Config in `core/config.py`: `pubsub_topic`, `pubsub_project`, optional `pubsub_emulator_host` for local tests.
+- [x] Add `google-cloud-pubsub` dependency.
+- [x] Unit tests with mocked publisher (`tests/test_pubsub_queue.py`).
 
-**Tasks:**
+#### 3. `worker-pubsub-push`
 
-1. Scaffold app in `frontend/` (or separate repo).
-2. Add CORS to FastAPI if browser calls API directly.
-3. Implement auth header injection and error handling.
-4. Deploy frontend (Vercel, Cloud Run static, or Firebase Hosting).
-5. Enable `AUTH_ENABLED=true` on API.
+- [x] New push route on worker FastAPI app (`worker_app.py`) instead of ARQ when pubsub mode.
+- [x] Decode Pub/Sub push envelope (base64 `message.data`); validate **Pub/Sub OIDC token** on `Authorization` header.
+- [x] Call `bootstrap_container()` → `orchestrator.run_batch_workflow(workflow_run_id, payload)`.
+- [x] Return 200 on success (ack); 500 on transient failure (Pub/Sub retry).
+- [x] Idempotency: rely on existing `workflow_runs.status == PENDING` guard in orchestrator (ADR-7).
+- [x] Update `scripts/cloudrun_worker_entrypoint.sh` to run uvicorn worker app when `JOB_QUEUE_PROVIDER=pubsub`.
 
----
+#### 4. `ops-pubsub-readiness`
 
-### Phase 11 — Security hardening
+- [x] When `job_queue_provider=pubsub`, API `/ready` skips ARQ heartbeat (`check_worker_health` → skipped with detail).
+- [x] Worker `/ready`: DB check only (no Redis ARQ key); Makefile sets `READINESS_CHECK_REDIS=false` on worker.
+- [x] Tests in `test_worker_readiness.py` / `test_readiness.py` for pubsub branch.
+- [x] Update ARCHITECTURE.md adapter matrix and Phase 14 note.
 
-**Goal:** Safe for external / multi-tenant use.
+### Acceptance criteria (GCP live)
 
-| Item | Risk today | Fix |
-|------|------------|-----|
-| Workflow/approval IDOR | Scoped keys/JWT must match workflow owner; unscoped keys are admin bypass | ✅ `assert_resource_user_scope` on workflow + approval routes |
-| Rate limits by IP | Shared NAT bypass | ✅ Key limits by API key / JWT user |
-| Concurrent approve | Double-approve race | ✅ Redis SET NX lock when auth + Redis |
-| Admin HTML | No user scoping | Fold into frontend or add scope checks |
+1. Set worker `min-instances=0`; no running worker instances when idle.
+2. `POST /api/v1/meetings/batch` (async) returns 202; within ~1–2 min workflow moves `PENDING` → `done` (or `awaiting_approval`).
+3. Cloud Run worker instance count scales up on publish, scales down after job completes.
+4. `GET /api/v1/workflows/{id}` shows tool executions and agent steps as today.
+5. Quality gate: `uv run ruff check src tests && uv run mypy src/meeting_assistant && uv run pytest`.
+6. Mark each feature `pass` in `features.json` with evidence + `testedAt`.
 
-Enable auth in prod: set `AUTH_ENABLED=true` in `deploy/.env.prod`, configure `GCP_AUTH_KEYS_SECRET`.
+### Key files to touch (next chat)
 
----
-
-### Phase 12 — Ops & observability
-
-| Item | Status | Action |
-|------|--------|--------|
-| Structlog JSON | ✅ | Ship to Cloud Logging |
-| OTEL tracing | ✅ | API + worker OTLP export; ARQ trace propagation; tool/batch spans |
-| Worker readiness | ✅ | `/ready` checks ARQ Redis heartbeat; worker Cloud Run `/ready` |
-| Stale workflows | ✅ | GET /admin/ops/stale-workflows + `stale_workflow_detected` logs |
-| DLQ / failed tools | ✅ | GET /admin/ops/failed-tools + `failed_tool_detected` logs |
+| File | Change |
+|------|--------|
+| `src/meeting_assistant/services/jobs.py` | `PubSubBatchJobQueue`, factory branch |
+| `src/meeting_assistant/bootstrap.py` | Wire pubsub queue |
+| `src/meeting_assistant/core/config.py` | Pub/Sub settings |
+| `src/meeting_assistant/worker.py` or new `worker_push.py` | Push HTTP handler |
+| `scripts/cloudrun_worker_entrypoint.sh` | Pub/Sub vs ARQ mode |
+| `Makefile` | Pub/Sub infra + `deploy-worker` min-instances |
+| `deploy/.env.prod.example` | Pub/Sub env vars |
+| `tests/test_jobs.py` / new `tests/test_pubsub_queue.py` | Publisher + handler tests |
+| `ARCHITECTURE.md` | ADR / adapter matrix (after implementation) |
 
 ---
 
@@ -202,15 +191,14 @@ Defaults: SQLite, heuristic planner/embeddings, stub tools, sync batch.
 
 ### Production-shaped local
 
-Copy `.env.production.example` → `.env.production`, point at local Postgres + Redis, run API + worker:
-
 ```bash
+cp .env.production.example .env.production
 export MEETING_ASSISTANT_ENV_FILE=.env.production
 uv run uvicorn meeting_assistant.main:app --reload
 uv run arq meeting_assistant.worker.WorkerSettings
 ```
 
-Or use Docker Compose (Postgres + Redis + API + ARQ worker):
+Or Docker Compose:
 
 ```bash
 cp .env.compose.example .env.compose
@@ -229,9 +217,9 @@ make deploy-bootstrap   # or deploy-api + deploy-worker
 
 When you complete a feature:
 
-1. Run the verification (test or manual Postman/GCP check).
-2. Edit `features.json`: set `"status": "pass"`, fill `evidence` and `testedAt`.
-3. Update the summary table in this file if the milestone is significant.
+1. Run verification (tests + manual check if needed).
+2. Edit `features.json`: `"status": "pass"`, `evidence`, `testedAt`.
+3. Update this file if the milestone is significant.
 
 ---
 
@@ -248,11 +236,8 @@ When you complete a feature:
 
 ---
 
-## Suggested priority order
+## Suggested next work
 
-1. **Phase 13 user integrations** — schema → OAuth API → Settings UI → per-user tool factory.
-2. **User login (JWT)** — before exposing OAuth in browser (`auth-user-login`).
-3. **Security hardening** — worker health, alerting (approve lock ✅, rate limit by identity ✅).
-4. **Ops** — OTEL tracing ✅, failed tool alerts ✅ (stale workflow alerting ✅).
-5. **Jira live** — deferred.
-6. **Real-time ASR** — v2.
+1. **Tasks endpoint scoping** — add `assert_user_scope` to `GET /meetings/{id}/tasks`.
+2. **Jira live** — re-enable deploy config and planner blocks when needed.
+3. **Real-time ASR** — v2 product surface; batch-first v1 is complete.

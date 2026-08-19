@@ -1,9 +1,14 @@
 #!/bin/sh
-# Cloud Run requires a listening HTTP port. ARQ does not expose one, so we serve /health
-# and /ready on $PORT in the background and run the worker in the foreground.
+# Cloud Run requires a listening HTTP port.
+# - pubsub mode: FastAPI worker app handles push deliveries + /health + /ready
+# - arq mode: minimal HTTP health server in background + ARQ consumer in foreground
 set -e
 
 PORT="${PORT:-8080}"
+
+if [ "${MEETING_ASSISTANT_JOB_QUEUE_PROVIDER:-arq}" = "pubsub" ]; then
+  exec uvicorn meeting_assistant.worker_app:app --host 0.0.0.0 --port "${PORT}"
+fi
 
 python - <<'PY' &
 import json

@@ -15,7 +15,7 @@ Modular monolith: single FastAPI service, protocol-based adapters, `bootstrap.py
                          │  FastAPI (Phase 8: auth, logs, limits) │
                          │  /health /ready  (public)            │
                          │  /api/v1/*       (protected opt-in)  │
-                         │  /api/v1/integrations/*  (Phase 13)  │
+                         │  /api/v1/integrations/*  /auth/*     │
                          └──────────┬─────────────┬────────────┘
                                     │             │
               ┌─────────────────────┘             └────────────────────┐
@@ -30,14 +30,14 @@ Modular monolith: single FastAPI service, protocol-based adapters, `bootstrap.py
   ASR    Normalizer  Embedder  AgentRuntime  ToolExecutor  Queue       │
     │         │         │          │            │          │            │
     │         │         │          │     UserToolProviderFactory       │
-    │         │         │          │     (Phase 13: per-user prefs)    │
+    │         │         │          │     (per-user integrations)       │
     └─────────┴─────────┴──────────┴────────────┴──────────┘            │
                               │                                         │
               ┌───────────────┼───────────────┐                         │
               ▼               ▼               ▼                         │
          PostgreSQL      Redis (opt)    Object storage (opt) ◄──────────┘
          SQLite (dev)    ARQ jobs
-         user_integrations (Phase 13)
+         user_integrations
 ```
 
 **Read path (isolated module):** `QueryService` → `EmbeddingIndex` → `QueryAnswerer` (RAG). No agent loop on search/query.
@@ -79,7 +79,7 @@ Read:
 | **7** | Retrieval          | Chunk/decision embeddings `0004`, chunk search, RAG `QueryAnswerer`, cursor pagination                  |
 | **8** | Hardening          | Auth, structlog, OTEL, `/ready`, slowapi, ruff/mypy/CI                                                  |
 | **9–12** | Prod tools + frontend + security | Live Slack/SendGrid/Calendar, Vite frontend, workflow scoping | ✅ v1 deploy-level tools |
-| **13** | User integrations  | `user_integrations`, OAuth connect, Settings UI, `UserToolProviderFactory`, app-branded outbound identity | Planned |
+| **13** | User integrations  | `user_integrations`, OAuth connect, Settings UI, `UserToolProviderFactory`, app-branded outbound identity | ✅ complete |
 
 
 ---
@@ -162,7 +162,7 @@ Read:
 
 **Decision:** `/health` always OK; `/ready` checks DB (+ Redis when used, optional embedder probe) → 503.  
 **Rationale:** K8s/load balancer patterns.  
-**Impact:** Ready does not verify ARQ worker process.
+**Impact:** When `READINESS_CHECK_WORKER=true` with async + ARQ, `/ready` checks ARQ worker heartbeat in Redis. With async + Pub/Sub (`JOB_QUEUE_PROVIDER=pubsub`), the worker check is skipped — Pub/Sub push invokes the scale-to-zero worker on demand. The worker Cloud Run service exposes its own `/ready` endpoint (database + optional embedder; no ARQ heartbeat).
 
 ### ADR-14: CI: fast SQLite suite + Postgres smoke
 
@@ -187,7 +187,7 @@ Deploy-level secrets (SendGrid API key, Slack app client_id/secret, assistant ca
 
 ### ADR-16: Per-user tool provider factory (Phase 13)
 
-**Decision:** Replace global `build_tool_providers(settings)` singleton with `UserToolProviderFactory` resolved at execution time from `meeting.user_id`. Planner receives `available_tools` based on connected integrations.  
+**Decision:** `UserToolProviderFactory` resolves `ToolProvider` at execution time from `meeting.user_id`, alongside deploy-level `build_tool_providers(settings)` fallback. Planner receives `available_tools` based on connected integrations.  
 **Rationale:** v1 env-only tools work for single-tenant GCP; multi-user product requires per-user channel/recipient/calendar prefs.  
 **Impact:** `ToolExecutor.execute()` loads meeting owner → factory → provider instance or `integration_not_connected`. Existing `ToolProvider` protocol unchanged. v1 deploy-level providers remain as optional org fallback when user has not connected.
 
@@ -204,23 +204,23 @@ Deploy-level secrets (SendGrid API key, Slack app client_id/secret, assistant ca
 | Embeddings       | `EMBEDDING_PROVIDER`    | heuristic               | openai                     |
 | Index backend    | inferred from DB URL    | InMemory                | PgVector                   |
 | Batch mode       | `BATCH_PROCESSING_MODE` | sync                    | async                      |
-| Job queue        | `JOB_QUEUE_PROVIDER`    | inprocess               | arq                        |
+| Job queue        | `JOB_QUEUE_PROVIDER`    | inprocess               | arq (Compose) / pubsub (GCP) |
 | Transcript queue | `QUEUE_PROVIDER`        | memory                  | redis                      |
 | ASR              | `ASR_PROVIDER`          | openai (manual text ok) | openai + upload/S3         |
 | Planner          | `LLM_PROVIDER`          | heuristic fallback      | openai                     |
 | Query            | `QUERY_PROVIDER`        | heuristic               | openai                     |
 | Auth             | `AUTH_ENABLED`          | false                   | api_key or jwt             |
 
-### Tool outbound identity (v1 deploy-level → v2 per-user)
+### Tool outbound identity (deploy fallback + per-user)
 
-| Tool | v1 (today) | v2 target identity | v1 config | v2 per-user config |
-| ---- | ---------- | ------------------ | --------- | ------------------ |
+| Tool | Deploy fallback (v1) | Per-user (Phase 13) | Deploy config | Per-user config |
+| ---- | -------------------- | ------------------- | ------------- | --------------- |
 | Slack | One webhook/bot for whole deploy | **Meeting Assistant** bot in user's workspace | `SLACK_PROVIDER`, webhook URL | OAuth install + channel picker |
-| Email | SendGrid from one sender | **Meeting Assistant** branded sender | `EMAIL_PROVIDER`, SendGrid key | Recipient prefs per user |
-| Calendar | Service account calendar | **Meeting Assistant** calendar invites user | `CALENDAR_PROVIDER`, SA JSON | Assistant organizer + user read OAuth |
-| Jira | One API token (deferred) | App/bot Jira account | `JIRA_PROVIDER` | Atlassian OAuth per user/org |
+| Email | SendGrid from one sender | **Meeting Assistant** branded sender + user recipient prefs | `EMAIL_PROVIDER`, SendGrid key | `email_prefs` integration row |
+| Calendar | Service account calendar | **Meeting Assistant** calendar invites user as attendee | `CALENDAR_PROVIDER`, SA JSON | Google OAuth + assistant organizer |
+| Jira | One API token (deferred) | App/bot Jira account (future) | `JIRA_PROVIDER` | Atlassian OAuth per user/org |
 
-v1 `*_PROVIDER` env vars in `services/tools/factory.py` remain valid for single-tenant / admin fallback. Phase 13 adds `UserToolProviderFactory` without removing env-based stubs.
+Deploy-level `*_PROVIDER` env vars in `services/tools/factory.py` remain as org fallback when a user has not connected. `UserToolProviderFactory` resolves per-user providers at execution time.
 
 
 ---
@@ -231,13 +231,13 @@ v1 `*_PROVIDER` env vars in `services/tools/factory.py` remain valid for single-
 | Group       | Tables                                                                       | Notes                             |
 | ----------- | ---------------------------------------------------------------------------- | --------------------------------- |
 | Identity    | `users`                                                                      | `external_id` tenant key          |
-| Integrations | `user_integrations` *(Phase 13)*                                          | OAuth tokens (encrypted), prefs   |
+| Integrations | `user_integrations`                                                       | OAuth tokens (encrypted), prefs   |
 | Content     | `meetings`, `meeting_chunks`, `transcript_artifacts`, `transcript_segments`  | Chunks carry `chunk_embedding`    |
 | Agent audit | `workflow_runs`, `agent_steps`, `tool_executions`, `tool_execution_attempts` | Idempotency + retries             |
 | Artifacts   | `tasks`, `decisions`                                                         | Decisions carry `topic_embedding` |
 | Human gate  | `approval_requests`                                                          | 1:1 with gated `tool_execution`   |
 
-### `user_integrations` (planned schema)
+### `user_integrations`
 
 | Column | Type | Notes |
 | ------ | ---- | ----- |
@@ -277,23 +277,22 @@ Unique constraint: `(user_id, provider, provider_account_id)`.
 | GET    | `/api/v1/decisions`                     | 7     | Semantic (was substring) |
 | GET    | `/api/v1/meetings/{id}/tasks`           | —     | Per meeting              |
 | POST   | `/api/v1/query`                         | 7     | RAG + citations          |
-| GET    | `/admin/approvals/{id}`                 | 5     | HTML approve UI          |
-
-### Phase 13 — Integrations API (planned)
-
-| Method | Path | Notes |
-| ------ | ---- | ----- |
-| GET | `/api/v1/integrations` | List connected integrations + status for current user |
-| GET | `/api/v1/integrations/{provider}/connect` | Start OAuth; returns redirect URL |
-| GET | `/api/v1/integrations/{provider}/callback` | OAuth callback (server-side token exchange) |
-| DELETE | `/api/v1/integrations/{provider}` | Disconnect / revoke |
-| PATCH | `/api/v1/integrations/{provider}/settings` | Update channels, notification emails, etc. |
-| GET | `/api/v1/integrations/{provider}/options` | e.g. list Slack channels after connect |
-
+| GET    | `/admin/approvals/{id}`                 | 5     | HTML approve UI (legacy; frontend inbox preferred) |
+| POST   | `/api/v1/auth/login`                    | 13    | API key → JWT exchange (or dev credentials) |
+| GET    | `/api/v1/auth/config`                   | 13    | Auth mode flags for frontend |
+| GET    | `/api/v1/auth/me`                       | 13    | Current session (Bearer JWT or API key) |
+| GET    | `/api/v1/integrations`                  | 13    | List connected integrations for current user |
+| GET    | `/api/v1/integrations/{provider}/connect` | 13  | Start OAuth; returns redirect URL |
+| GET    | `/api/v1/integrations/{provider}/callback` | 13 | OAuth callback (server-side token exchange) |
+| DELETE | `/api/v1/integrations/{provider}`       | 13    | Disconnect / revoke |
+| PATCH  | `/api/v1/integrations/{provider}/settings` | 13 | Update channels, notification emails, etc. |
+| GET    | `/api/v1/integrations/{provider}/options` | 13  | e.g. list Slack channels after connect |
+| GET    | `/admin/ops/stale-workflows`            | 12    | PENDING workflows beyond threshold |
+| GET    | `/admin/ops/failed-tools`               | 12    | Failed tool executions / DLQ exhaustion |
 
 ---
 
-## User integrations flow (Phase 13)
+## User integrations flow
 
 ```
 User logs in (JWT/session or scoped API key)
@@ -316,22 +315,26 @@ Batch ingest (meeting.user_id)
 
 ---
 
-## Known v1 gaps (documented tradeoffs)
+## Known gaps and tradeoffs
 
-- Per-user integrations not implemented — tools use deploy-level env config (Phase 13).
+**Resolved in Phase 13 / ops hardening:** per-user integrations (`UserToolProviderFactory`), workflow/approval user scoping, rate limits by API key/JWT identity, Redis approve lock, ARQ worker heartbeat in `/ready`, OTEL tracing on API + worker, stale workflow and failed tool alerting.
+
+**Phase 14 (Pub/Sub worker):** GCP production can set `JOB_QUEUE_PROVIDER=pubsub` — API publishes batch jobs to Cloud Pub/Sub; worker scales to zero and wakes on push to `POST /internal/jobs/batch`. `/ready` skips ARQ heartbeat in pubsub mode; stale-workflow and failed-tool ops alerts unchanged.
+
+**Remaining:**
+
 - Transcript queue ack/nack unused in pipeline (publish+drain only).
 - `background` tool backoff still blocks executor thread on `future.result()`.
-- Rate limits keyed by client IP, not API key.
-- No distributed lock on concurrent approve.
-- ARQ worker not traced/auth’d separately from API.
-- `GET /meetings/{id}/tasks` lacks user scoping (IDOR gap for multi-tenant).
+- `GET /meetings/{id}/tasks` lacks user scoping (IDOR gap for multi-tenant — other retrieval routes are scoped).
+- Jira live integration deferred (`tool-jira-live` in `features.json`).
+- Real-time ASR streaming is a v2 candidate (`realtime-asr-streaming` in `features.json`).
 
 ---
 
 ## v2 extraction candidates (seams already exist)
 
 1. **Read service** — `QueryService`, `EmbeddingIndex`, retrieval routes, read replica.
-2. **Ingest worker** — ARQ + `run_batch_workflow` only (already separate process).
+2. **Ingest worker** — Pub/Sub push or ARQ + `run_batch_workflow` only (already separate process).
 3. **Event bus** — replace `BatchJobQueue` Redis with Kafka producer; orchestrator unchanged.
 4. **Real-time ASR** — different product surface; batch-first v1 stands.
 
@@ -349,9 +352,14 @@ Batch ingest (meeting.user_id)
 | `src/meeting_assistant/services/embeddings.py`    | Embed + search protocols           |
 | `src/meeting_assistant/services/query.py`         | Read facade                        |
 | `src/meeting_assistant/services/tools/factory.py` | Deploy-level tool providers (v1)     |
-| `src/meeting_assistant/services/tools/user_factory.py` | Per-user provider factory *(Phase 13)* |
+| `src/meeting_assistant/services/tools/user_factory.py` | Per-user provider factory |
+| `src/meeting_assistant/services/integrations/service.py` | OAuth connect, token storage, settings |
+| `src/meeting_assistant/api/routes/integrations.py` | Integrations HTTP API |
+| `src/meeting_assistant/api/routes/auth_routes.py` | Login / session endpoints |
+| `src/meeting_assistant/services/stale_workflows.py` | Stale workflow ops monitor |
+| `src/meeting_assistant/services/failed_tools.py` | Failed tool ops monitor |
 | `src/meeting_assistant/api/app.py`                | HTTP envelope (auth, logs, limits) |
-| `migrations/versions/`                            | Schema contract                    |
+| `migrations/versions/`                            | Schema contract (0001–0005) |
 
 
 ---
@@ -379,6 +387,13 @@ export MEETING_ASSISTANT_AUTH_ENABLED="true"
 export MEETING_ASSISTANT_AUTH_API_KEYS="alice:secret"
 export MEETING_ASSISTANT_LOG_JSON="true"
 export MEETING_ASSISTANT_RATE_LIMIT_ENABLED="true"
+export MEETING_ASSISTANT_READINESS_CHECK_WORKER="true"
+
+# Per-user integrations (Phase 13)
+export MEETING_ASSISTANT_INTEGRATIONS_ENCRYPTION_KEY="..."
+export MEETING_ASSISTANT_INTEGRATIONS_OAUTH_REDIRECT_BASE="https://your-api.run.app"
+export MEETING_ASSISTANT_SLACK_OAUTH_CLIENT_ID="..."
+export MEETING_ASSISTANT_GOOGLE_OAUTH_CLIENT_ID="..."
 ```
 
 Verify: `curl /ready` → `ready`; batch → approval → approve → `done`; `POST /query` returns citations.

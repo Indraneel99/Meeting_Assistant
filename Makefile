@@ -33,10 +33,17 @@ help:
 	@echo "  make docker-push           Build and push to Artifact Registry"
 	@echo "  make migrate               Run Alembic migrations (Cloud SQL Auth Proxy must be running)"
 	@echo "  make deploy-api            Deploy / update API Cloud Run service"
-	@echo "  make deploy-worker         Deploy / update ARQ worker Cloud Run service"
+	@echo "  make deploy-worker         Deploy / update worker Cloud Run service (ARQ or Pub/Sub push)"
 	@echo "  make deploy                deploy-api + deploy-worker"
 	@echo "  make smoke                 curl /health and /ready on deployed API"
 	@echo "  make deploy-bootstrap      Single-service deploy (inprocess queue, for first audio test)"
+	@echo ""
+	@echo "Pub/Sub batch queue (Phase 14 — set JOB_QUEUE_PROVIDER=pubsub in deploy/.env.prod):"
+	@echo "  make pubsub-topic-create       Create Pub/Sub topic for batch jobs"
+	@echo "  make pubsub-push-sa-create     Create push-invoker service account"
+	@echo "  make pubsub-iam                Grant publisher (API SA) + invoker (push SA on worker)"
+	@echo "  make pubsub-subscription-create  Push subscription → worker $(PUBSUB_PUSH_PATH)"
+	@echo "  make pubsub-setup              topic + SA + IAM + subscription (worker must exist for sub)"
 	@echo ""
 	@echo "Local Docker Compose (Postgres + Redis + API + worker):"
 	@echo "  make compose-config        Validate docker-compose.yml"
@@ -62,7 +69,8 @@ gcp-bootstrap:
 		storage.googleapis.com \
 		cloudbuild.googleapis.com \
 		compute.googleapis.com \
-		vpcaccess.googleapis.com
+		vpcaccess.googleapis.com \
+		pubsub.googleapis.com
 	gcloud artifacts repositories describe $(ARTIFACT_REPO) \
 		--location=$(REGION) >/dev/null 2>&1 \
 	|| gcloud artifacts repositories create $(ARTIFACT_REPO) \
@@ -139,7 +147,7 @@ SLACK_DEFAULT_CHANNEL ?=
 
 EMAIL_PROVIDER ?= stub
 GCP_SENDGRID_SECRET ?= SENDGRID_API_KEY
-EMAIL_FROM_ADDRESS ?= noreply@example.com
+EMAIL_FROM_ADDRESS ?= assistant@meeting-assistant.org
 EMAIL_FROM_NAME ?= Meeting Assistant
 EMAIL_DEFAULT_RECIPIENT ?=
 
@@ -165,13 +173,36 @@ JIRA_USER_EMAIL ?=
 JIRA_PROJECT_KEY ?=
 JIRA_DEFAULT_ISSUE_TYPE ?= Task
 
+# --- Phase 14 — Pub/Sub batch job queue (GCP production; Docker Compose keeps arq) ---
+JOB_QUEUE_PROVIDER ?= arq
+PUBSUB_TOPIC ?= meeting-assistant-batch-jobs
+PUBSUB_PROJECT ?= $(PROJECT_ID)
+PUBSUB_SUBSCRIPTION ?= meeting-assistant-batch-push
+PUBSUB_PUSH_PATH ?= /internal/jobs/batch
+PUBSUB_PUSH_SERVICE_ACCOUNT ?= pubsub-push@$(PROJECT_ID).iam.gserviceaccount.com
+PROJECT_NUMBER ?= $(shell gcloud projects describe $(PROJECT_ID) --format='value(projectNumber)' 2>/dev/null)
+DEFAULT_RUN_SA ?= $(PROJECT_NUMBER)-compute@developer.gserviceaccount.com
+
+# ARQ polls Redis continuously (min-instances=1); Pub/Sub push wakes worker on demand (min-instances=0).
+ifeq ($(JOB_QUEUE_PROVIDER),pubsub)
+WORKER_MIN_INSTANCES := 0
+else
+WORKER_MIN_INSTANCES := 1
+endif
+
 # Optional: omit DB_PASSWORD from deploy/.env.prod and fetch from Secret Manager at deploy time
 ifndef DB_PASSWORD
 DB_PASSWORD := $(shell gcloud secrets versions access latest --secret=$(GCP_DB_PASSWORD_SECRET) --project=$(PROJECT_ID) 2>/dev/null)
 endif
 
 # gcloud --set-env-vars requires comma-separated KEY=VALUE pairs (spaces break DATABASE_URL).
-CLOUD_RUN_ENV := MEETING_ASSISTANT_DATABASE_URL=postgresql+psycopg://$(DB_USER):$(DB_PASSWORD)@/$(DB_NAME)?host=/cloudsql/$(CLOUDSQL_INSTANCE_CONNECTION),MEETING_ASSISTANT_BATCH_PROCESSING_MODE=async,MEETING_ASSISTANT_JOB_QUEUE_PROVIDER=arq,MEETING_ASSISTANT_QUEUE_PROVIDER=redis,MEETING_ASSISTANT_REDIS_URL=$(REDIS_URL),MEETING_ASSISTANT_EMBEDDING_PROVIDER=openai,MEETING_ASSISTANT_QUERY_PROVIDER=openai,MEETING_ASSISTANT_LLM_PROVIDER=openai,MEETING_ASSISTANT_ASR_PROVIDER=openai,MEETING_ASSISTANT_ASR_UPLOAD_BACKEND=gcs,MEETING_ASSISTANT_ASR_GCS_BUCKET=$(GCS_AUDIO_BUCKET),MEETING_ASSISTANT_AUTH_ENABLED=$(AUTH_ENABLED),MEETING_ASSISTANT_LOG_JSON=true,MEETING_ASSISTANT_RATE_LIMIT_ENABLED=true,MEETING_ASSISTANT_READINESS_CHECK_REDIS=true,MEETING_ASSISTANT_SLACK_PROVIDER=$(SLACK_PROVIDER),MEETING_ASSISTANT_EMAIL_PROVIDER=$(EMAIL_PROVIDER),MEETING_ASSISTANT_CALENDAR_PROVIDER=$(CALENDAR_PROVIDER),MEETING_ASSISTANT_CALENDAR_ASSISTANT_ORGANIZER_NAME=$(CALENDAR_ASSISTANT_ORGANIZER_NAME)
+CLOUD_RUN_ENV := MEETING_ASSISTANT_DATABASE_URL=postgresql+psycopg://$(DB_USER):$(DB_PASSWORD)@/$(DB_NAME)?host=/cloudsql/$(CLOUDSQL_INSTANCE_CONNECTION),MEETING_ASSISTANT_BATCH_PROCESSING_MODE=async,MEETING_ASSISTANT_JOB_QUEUE_PROVIDER=$(JOB_QUEUE_PROVIDER),MEETING_ASSISTANT_QUEUE_PROVIDER=redis,MEETING_ASSISTANT_REDIS_URL=$(REDIS_URL),MEETING_ASSISTANT_EMBEDDING_PROVIDER=openai,MEETING_ASSISTANT_QUERY_PROVIDER=openai,MEETING_ASSISTANT_LLM_PROVIDER=openai,MEETING_ASSISTANT_ASR_PROVIDER=openai,MEETING_ASSISTANT_ASR_UPLOAD_BACKEND=gcs,MEETING_ASSISTANT_ASR_GCS_BUCKET=$(GCS_AUDIO_BUCKET),MEETING_ASSISTANT_AUTH_ENABLED=$(AUTH_ENABLED),MEETING_ASSISTANT_LOG_JSON=true,MEETING_ASSISTANT_RATE_LIMIT_ENABLED=true,MEETING_ASSISTANT_READINESS_CHECK_REDIS=true,MEETING_ASSISTANT_SLACK_PROVIDER=$(SLACK_PROVIDER),MEETING_ASSISTANT_EMAIL_PROVIDER=$(EMAIL_PROVIDER),MEETING_ASSISTANT_CALENDAR_PROVIDER=$(CALENDAR_PROVIDER),MEETING_ASSISTANT_CALENDAR_ASSISTANT_ORGANIZER_NAME=$(CALENDAR_ASSISTANT_ORGANIZER_NAME)
+
+ifeq ($(JOB_QUEUE_PROVIDER),pubsub)
+CLOUD_RUN_ENV := $(CLOUD_RUN_ENV),MEETING_ASSISTANT_PUBSUB_TOPIC=$(PUBSUB_TOPIC),MEETING_ASSISTANT_PUBSUB_PROJECT=$(PUBSUB_PROJECT)
+endif
+
+PUBSUB_PUSH_AUDIENCE ?=
 
 CLOUD_RUN_SECRETS := MEETING_ASSISTANT_LLM_OPENAI_API_KEY=$(GCP_OPENAI_SECRET):latest,MEETING_ASSISTANT_EMBEDDING_OPENAI_API_KEY=$(GCP_OPENAI_SECRET):latest,MEETING_ASSISTANT_ASR_OPENAI_API_KEY=$(GCP_OPENAI_SECRET):latest,MEETING_ASSISTANT_INTEGRATIONS_ENCRYPTION_KEY=$(GCP_INTEGRATIONS_ENCRYPTION_SECRET):latest,MEETING_ASSISTANT_SLACK_OAUTH_CLIENT_SECRET=$(GCP_SLACK_OAUTH_CLIENT_SECRET):latest,MEETING_ASSISTANT_GOOGLE_OAUTH_CLIENT_SECRET=$(GCP_GOOGLE_OAUTH_CLIENT_SECRET):latest
 
@@ -230,6 +261,14 @@ else
 CLOUD_RUN_WORKER_ENV := $(CLOUD_RUN_ENV)
 endif
 
+ifeq ($(JOB_QUEUE_PROVIDER),pubsub)
+ifneq ($(PUBSUB_PUSH_AUDIENCE),)
+CLOUD_RUN_WORKER_ENV := $(CLOUD_RUN_WORKER_ENV),MEETING_ASSISTANT_PUBSUB_PUSH_AUDIENCE=$(PUBSUB_PUSH_AUDIENCE)
+endif
+CLOUD_RUN_ENV := $(CLOUD_RUN_ENV),MEETING_ASSISTANT_READINESS_CHECK_WORKER=false
+CLOUD_RUN_WORKER_ENV := $(CLOUD_RUN_WORKER_ENV),MEETING_ASSISTANT_READINESS_CHECK_WORKER=false,MEETING_ASSISTANT_READINESS_CHECK_REDIS=false
+endif
+
 .PHONY: deploy-api
 deploy-api: docker-push
 	gcloud run deploy $(SERVICE_API) \
@@ -262,6 +301,7 @@ deploy-worker: docker-push
 		--cpu=2 \
 		--memory=4Gi \
 		--timeout=3600 \
+		--min-instances=$(WORKER_MIN_INSTANCES) \
 		--max-instances=5 \
 		--no-cpu-throttling \
 		--command=/app/scripts/cloudrun_worker_entrypoint.sh \
@@ -302,6 +342,75 @@ smoke:
 	echo "API URL: $$URL"; \
 	curl -fsS "$$URL/health"; echo; \
 	curl -fsS "$$URL/ready" | python3 -m json.tool
+
+# --- Pub/Sub infrastructure (Phase 14) ---
+.PHONY: pubsub-push-sa-create
+pubsub-push-sa-create:
+	gcloud config set project $(PROJECT_ID)
+	gcloud iam service-accounts describe $(PUBSUB_PUSH_SERVICE_ACCOUNT) --project=$(PROJECT_ID) >/dev/null 2>&1 \
+	|| gcloud iam service-accounts create pubsub-push \
+		--project=$(PROJECT_ID) \
+		--display-name="Pub/Sub push invoker for Meeting Assistant worker"
+
+.PHONY: pubsub-topic-create
+pubsub-topic-create:
+	gcloud config set project $(PUBSUB_PROJECT)
+	gcloud pubsub topics describe $(PUBSUB_TOPIC) --project=$(PUBSUB_PROJECT) >/dev/null 2>&1 \
+	|| gcloud pubsub topics create $(PUBSUB_TOPIC) --project=$(PUBSUB_PROJECT)
+
+.PHONY: pubsub-iam
+pubsub-iam: pubsub-push-sa-create pubsub-topic-create
+	@API_SA=$$(gcloud run services describe $(SERVICE_API) \
+		--project=$(PROJECT_ID) --region=$(REGION) \
+		--format='value(spec.template.spec.serviceAccountName)' 2>/dev/null); \
+	API_SA=$${API_SA:-$(DEFAULT_RUN_SA)}; \
+	echo "Granting roles/pubsub.publisher on $(PUBSUB_TOPIC) to $$API_SA"; \
+	gcloud pubsub topics add-iam-policy-binding $(PUBSUB_TOPIC) \
+		--project=$(PUBSUB_PROJECT) \
+		--member="serviceAccount:$$API_SA" \
+		--role="roles/pubsub.publisher" \
+		--quiet
+	@if gcloud run services describe $(SERVICE_WORKER) \
+		--project=$(PROJECT_ID) --region=$(REGION) >/dev/null 2>&1; then \
+		echo "Granting roles/run.invoker on $(SERVICE_WORKER) to $(PUBSUB_PUSH_SERVICE_ACCOUNT)"; \
+		gcloud run services add-iam-policy-binding $(SERVICE_WORKER) \
+			--project=$(PROJECT_ID) --region=$(REGION) \
+			--member="serviceAccount:$(PUBSUB_PUSH_SERVICE_ACCOUNT)" \
+			--role="roles/run.invoker" \
+			--quiet; \
+	else \
+		echo "Worker not deployed yet — run make deploy-worker then re-run make pubsub-iam for run.invoker"; \
+	fi
+
+.PHONY: pubsub-subscription-create
+pubsub-subscription-create: pubsub-topic-create pubsub-push-sa-create
+	@WORKER_URL=$$(gcloud run services describe $(SERVICE_WORKER) \
+		--project=$(PROJECT_ID) --region=$(REGION) \
+		--format='value(status.url)' 2>/dev/null); \
+	if [ -z "$$WORKER_URL" ]; then \
+		echo "Deploy worker first: make deploy-worker JOB_QUEUE_PROVIDER=pubsub"; exit 1; fi; \
+	PUSH_ENDPOINT="$$WORKER_URL$(PUBSUB_PUSH_PATH)"; \
+	echo "Push endpoint: $$PUSH_ENDPOINT"; \
+	if gcloud pubsub subscriptions describe $(PUBSUB_SUBSCRIPTION) --project=$(PUBSUB_PROJECT) >/dev/null 2>&1; then \
+		gcloud pubsub subscriptions update $(PUBSUB_SUBSCRIPTION) \
+			--project=$(PUBSUB_PROJECT) \
+			--push-endpoint="$$PUSH_ENDPOINT" \
+			--push-auth-service-account="$(PUBSUB_PUSH_SERVICE_ACCOUNT)"; \
+	else \
+		gcloud pubsub subscriptions create $(PUBSUB_SUBSCRIPTION) \
+			--project=$(PUBSUB_PROJECT) \
+			--topic=$(PUBSUB_TOPIC) \
+			--push-endpoint="$$PUSH_ENDPOINT" \
+			--push-auth-service-account="$(PUBSUB_PUSH_SERVICE_ACCOUNT)" \
+			--ack-deadline=600 \
+			--message-retention-duration=7d \
+			--min-retry-delay=10s \
+			--max-retry-delay=600s; \
+	fi
+
+.PHONY: pubsub-setup
+pubsub-setup: pubsub-iam pubsub-subscription-create
+	@echo "Pub/Sub infra ready. Set JOB_QUEUE_PROVIDER=pubsub and deploy-api after job-queue-pubsub code is merged."
 
 # --- Local Docker Compose (production-shaped dev without GCP) ---
 COMPOSE_ENV_FILE ?= .env.compose

@@ -34,6 +34,9 @@ def bootstrap_container(settings: Settings | None = None) -> Container:
         batch_processing_mode=settings.batch_processing_mode,
         job_queue_provider=settings.job_queue_provider,
         redis_url=settings.redis_url,
+        pubsub_topic=settings.pubsub_topic,
+        pubsub_project=settings.pubsub_project,
+        pubsub_emulator_host=settings.pubsub_emulator_host,
     )
     embedding_index = build_embedding_index(settings)
     asr = build_asr(settings)

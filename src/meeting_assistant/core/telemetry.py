@@ -75,6 +75,10 @@ def inject_trace_context(payload: dict[str, Any]) -> dict[str, Any]:
 
 def pop_trace_context(payload: dict[str, Any]) -> Any | None:
     carrier = payload.pop(TRACE_CONTEXT_KEY, None)
+    return extract_trace_context_from_carrier(carrier)
+
+
+def extract_trace_context_from_carrier(carrier: dict[str, str] | None) -> Any | None:
     if not carrier:
         return None
     try:

@@ -136,6 +136,11 @@ class Settings(BaseSettings):
     queue_provider: str = "memory"
     job_queue_provider: str = "inprocess"
     redis_url: str = "redis://localhost:6379/0"
+    pubsub_topic: str | None = None
+    pubsub_project: str | None = None
+    pubsub_emulator_host: str | None = None
+    pubsub_push_audience: str | None = None
+    pubsub_push_skip_auth: bool = False
 
     # --- Auth ---
     auth_enabled: bool = False

@@ -477,6 +477,38 @@
       "name": "Real-time ASR Streaming",
       "description": "Live meeting transcription stream instead of batch-only upload pipeline. v2 candidate per ARCHITECTURE.md; different product surface from batch-first v1.",
       "status": "not_started"
+    },
+    {
+      "id": "job-queue-pubsub",
+      "name": "Pub/Sub Batch Job Queue (API publish)",
+      "description": "Add PubSubBatchJobQueue implementing BatchJobQueue protocol. On async batch submit, API publishes {workflow_run_id, payload} to a GCP Pub/Sub topic instead of enqueueing to Redis/ARQ. Config: JOB_QUEUE_PROVIDER=pubsub, PUBSUB_TOPIC (and project). Redis+ARQ remain for local Docker Compose and dev; GCP production migrates off always-on ARQ consumer. Depends on deploy-pubsub-gcp for topic IAM.",
+      "status": "pass",
+      "evidence": "PubSubBatchJobQueue in services/jobs.py; build_batch_job_queue pubsub branch; config pubsub_topic/pubsub_project/pubsub_emulator_host; bootstrap wiring; google-cloud-pubsub dep; test_pubsub_queue.py (5 tests) + test_jobs.py pass; ruff pass",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "worker-pubsub-push",
+      "name": "Pub/Sub Push Worker Handler",
+      "description": "Replace long-running ARQ process as the GCP worker entrypoint when JOB_QUEUE_PROVIDER=pubsub. Cloud Run worker exposes an authenticated HTTP endpoint (e.g. POST /internal/jobs/batch) that receives Pub/Sub push deliveries, validates the Pub/Sub OIDC token, decodes the message, and runs orchestrator.run_batch_workflow(workflow_run_id, payload). Return 2xx to ack; non-2xx for retry. Preserve trace context from message attributes. Worker can scale to zero (min-instances=0) because Pub/Sub invokes on each message.",
+      "status": "pass",
+      "evidence": "worker_app.py POST /internal/jobs/batch; pubsub_push.py decode + OIDC verify; cloudrun_worker_entrypoint.sh uvicorn branch; pubsub_push_audience config; Makefile PUBSUB_PUSH_AUDIENCE on worker; test_pubsub_push.py (7 tests); ruff pass",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "deploy-pubsub-gcp",
+      "name": "GCP Pub/Sub Deploy Infrastructure",
+      "description": "Provision Pub/Sub topic + push subscription targeting the worker Cloud Run URL; IAM for API service account (roles/pubsub.publisher) and Pub/Sub push invoker on worker (roles/run.invoker). Makefile targets: create/update topic and subscription, deploy-worker with min-instances=0 (request-based, no always-on cost). Update deploy/.env.prod.example and deploy docs. Migration path: switch JOB_QUEUE_PROVIDER from arq to pubsub, remove worker min-instances=1 requirement and optional Upstash Redis dependency for job queue only.",
+      "status": "pass",
+      "evidence": "Makefile pubsub-topic-create/push-sa-create/iam/subscription-create/setup; JOB_QUEUE_PROVIDER + PUBSUB_* env in deploy/.env.prod.example; deploy-worker --min-instances=0 when pubsub; pubsub.googleapis.com in gcp-bootstrap; test_deploy_pubsub.py (6 tests); ruff pass",
+      "testedAt": "2026-08-19"
+    },
+    {
+      "id": "ops-pubsub-readiness",
+      "name": "Pub/Sub Mode Readiness & Ops",
+      "description": "When JOB_QUEUE_PROVIDER=pubsub, skip ARQ Redis heartbeat in API /ready (READINESS_CHECK_WORKER=false or pubsub-aware branch). Worker /ready checks DB (+ embedder if configured) without requiring ARQ health key. Update ops-worker-readiness docs; stale-workflow and failed-tool alerts unchanged. Tests: test_jobs.py or new test_pubsub_queue.py with Pub/Sub emulator or mocked publisher/push handler.",
+      "status": "pass",
+      "evidence": "check_worker_health pubsub branch; build_readiness_report uses check_worker_health; Makefile READINESS_CHECK_WORKER=false + worker READINESS_CHECK_REDIS=false when pubsub; ARCHITECTURE.md Phase 14; test_worker_readiness.py (3 pubsub tests) + test_readiness.py + test_deploy_pubsub.py; ruff pass",
+      "testedAt": "2026-08-19"
     }
   ]
 }
