@@ -8,8 +8,8 @@ This repository contains a batch-first meeting assistant with a production-shape
 - Durable workflow state in Postgres-compatible SQLAlchemy models (SQLite for local dev)
 - Queue, hybrid ASR, planner, tool execution, and embedding abstractions
 - Per-user integrations (Slack, email prefs, Google calendar) with OAuth connect API
-- Vite+React frontend: upload, workflow status, search, RAG query, approvals, integrations settings
-- 170+ pytest tests; CI with ruff, mypy, SQLite suite, and Postgres migration smoke
+- Vite+React frontend: upload, workflow status, search, RAG query, approvals, integrations settings, email/password and Google login
+- 210+ pytest tests; CI with ruff, mypy, SQLite suite, and Postgres migration smoke
 
 ## Architecture notes
 
@@ -23,7 +23,7 @@ The current implementation is a modular monolith:
 - Tool execution now includes idempotency keys, retry attempts, approval gating for calendar actions, and dead-letter style failure metadata
 - Retrieval endpoints expose recent memory, tasks, and decisions
 
-The storage model is compatible with a future Postgres + pgvector deployment. Local development defaults to SQLite, while the vector layer is abstracted so a real pgvector-backed implementation can replace the in-process cosine similarity store.
+Local development defaults to SQLite and an in-process vector store. Production uses Cloud SQL Postgres with pgvector: semantic search reads stored `summary_embedding` vectors. The vector layer stays behind an abstraction so local runs do not need Postgres.
 
 ## User integrations (Phase 13 — complete)
 
@@ -39,9 +39,9 @@ Configure OAuth app credentials in `.env.production.example` (`SLACK_OAUTH_*`, `
 
 ## Frontend
 
-A Vite + React app lives in [`frontend/`](./frontend/). Run the API on port 8000, then `cd frontend && npm run dev` for port 5173. Screens: Upload, Workflow status, Search, Ask (RAG), Approvals, and **Settings → Integrations** for connect/disconnect flows. Auth via JWT login (`POST /api/v1/auth/login`) or `X-API-Key` header.
+A Vite + React app lives in [`frontend/`](./frontend/). Run the API on port 8000, then `cd frontend && npm run dev` for port 5173. Screens: Upload, Workflow status, Search, Ask (RAG), Approvals, **Settings → Integrations**, and `/login` / `/register`.
 
-**Phase 15 (planned):** Dedicated `/login` and `/register` pages with email/password and Sign in with Google — replacing the API-key panel. See `progress.md` Phase 15 handoff.
+Browser auth is email/password or Sign in with Google (`POST /api/v1/auth/register`, `POST /api/v1/auth/login/email`, `GET /api/v1/auth/google/connect`). The app stores a JWT and sends `Authorization: Bearer`. `X-API-Key` and `POST /api/v1/auth/login` remain for Postman and scripts only. See [`progress.md`](./progress.md) Phase 15 and ADR-17 in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Run locally
 
@@ -80,7 +80,7 @@ export MEETING_ASSISTANT_BATCH_PROCESSING_MODE="async"
 export MEETING_ASSISTANT_JOB_QUEUE_PROVIDER="inprocess"
 ```
 
-Production-style async processing uses Redis + ARQ:
+Docker Compose and a local production-shaped worker use Redis + ARQ:
 
 ```bash
 export MEETING_ASSISTANT_BATCH_PROCESSING_MODE="async"
@@ -89,6 +89,17 @@ export MEETING_ASSISTANT_QUEUE_PROVIDER="redis"
 export MEETING_ASSISTANT_REDIS_URL="redis://localhost:6379/0"
 uv run arq meeting_assistant.worker.WorkerSettings
 ```
+
+GCP production uses Pub/Sub. The API publishes batch jobs, and Cloud Run pushes them to the worker at `POST /internal/jobs/batch`. Redis stays in use for approval locks.
+
+```bash
+export MEETING_ASSISTANT_BATCH_PROCESSING_MODE="async"
+export MEETING_ASSISTANT_JOB_QUEUE_PROVIDER="pubsub"
+export MEETING_ASSISTANT_PUBSUB_TOPIC="meeting-assistant-batch-jobs"
+export MEETING_ASSISTANT_PUBSUB_PROJECT="your_project_id"
+```
+
+Deploy wiring lives in `deploy/.env.prod` (`make deploy-api`, `make deploy-worker`). See [`progress.md`](./progress.md) Phase 14.
 
 ### Docker Compose (Postgres + Redis + API + worker)
 
@@ -182,13 +193,17 @@ Tool providers default to local stubs for offline development. **Deploy-level** 
 # Email via SendGrid (Meeting Assistant branded sender)
 export MEETING_ASSISTANT_EMAIL_PROVIDER="sendgrid"
 export MEETING_ASSISTANT_EMAIL_SENDGRID_API_KEY="..."
-export MEETING_ASSISTANT_EMAIL_FROM_ADDRESS="Meeting Assistant <notifications@yourdomain.com>"
+export MEETING_ASSISTANT_EMAIL_FROM_ADDRESS="notifications@yourdomain.com"
+export MEETING_ASSISTANT_EMAIL_FROM_NAME="Meeting Assistant"
 export MEETING_ASSISTANT_EMAIL_DEFAULT_RECIPIENT="team@yourdomain.com"
 
-# Calendar via Google service account (Phase 13: assistant-owned organizer calendar)
+# Calendar via Google service account (assistant-owned organizer calendar)
+# Impersonate a Workspace user that has Calendar turned on. Domain-wide delegation
+# scope: https://www.googleapis.com/auth/calendar
 export MEETING_ASSISTANT_CALENDAR_PROVIDER="google"
 export MEETING_ASSISTANT_CALENDAR_GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
-export MEETING_ASSISTANT_CALENDAR_GOOGLE_CALENDAR_ID="primary"
+export MEETING_ASSISTANT_CALENDAR_GOOGLE_CALENDAR_ID="assistant@yourdomain.com"
+export MEETING_ASSISTANT_CALENDAR_GOOGLE_IMPERSONATE_SUBJECT="assistant@yourdomain.com"
 
 # Slack via bot or webhook (Phase 13: per-user workspace OAuth, bot posts as Meeting Assistant)
 export MEETING_ASSISTANT_SLACK_PROVIDER="webhook"

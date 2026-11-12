@@ -409,22 +409,32 @@ pubsub-subscription-create: pubsub-topic-create pubsub-push-sa-create
 	if [ -z "$$WORKER_URL" ]; then \
 		echo "Deploy worker first: make deploy-worker JOB_QUEUE_PROVIDER=pubsub"; exit 1; fi; \
 	PUSH_ENDPOINT="$$WORKER_URL$(PUBSUB_PUSH_PATH)"; \
+	AUDIENCE="$${PUBSUB_PUSH_AUDIENCE:-$$PUSH_ENDPOINT}"; \
 	echo "Push endpoint: $$PUSH_ENDPOINT"; \
+	echo "Push token audience: $$AUDIENCE"; \
 	if gcloud pubsub subscriptions describe $(PUBSUB_SUBSCRIPTION) --project=$(PUBSUB_PROJECT) >/dev/null 2>&1; then \
 		gcloud pubsub subscriptions update $(PUBSUB_SUBSCRIPTION) \
 			--project=$(PUBSUB_PROJECT) \
 			--push-endpoint="$$PUSH_ENDPOINT" \
-			--push-auth-service-account="$(PUBSUB_PUSH_SERVICE_ACCOUNT)"; \
+			--push-auth-service-account="$(PUBSUB_PUSH_SERVICE_ACCOUNT)" \
+			--push-auth-token-audience="$$AUDIENCE" \
+			--expiration-period=never \
+			--ack-deadline=600 \
+			--message-retention-duration=7d \
+			--min-retry-delay=10s \
+			--max-retry-delay=600s; \
 	else \
 		gcloud pubsub subscriptions create $(PUBSUB_SUBSCRIPTION) \
 			--project=$(PUBSUB_PROJECT) \
 			--topic=$(PUBSUB_TOPIC) \
 			--push-endpoint="$$PUSH_ENDPOINT" \
 			--push-auth-service-account="$(PUBSUB_PUSH_SERVICE_ACCOUNT)" \
+			--push-auth-token-audience="$$AUDIENCE" \
 			--ack-deadline=600 \
 			--message-retention-duration=7d \
 			--min-retry-delay=10s \
-			--max-retry-delay=600s; \
+			--max-retry-delay=600s \
+			--expiration-period=never; \
 	fi
 
 .PHONY: pubsub-setup

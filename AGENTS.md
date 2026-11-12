@@ -6,7 +6,7 @@
 
 Single-service Python **Meeting Assistant** API (modular monolith) plus a **Vite+React frontend** in `frontend/`. Default dev stack: SQLite + in-process queue/embeddings + heuristic planner + stub tools.
 
-**Phase 15 (planned):** Proper login UI — email/password + Google Sign-In. Replaces browser API-key panel; Secret Manager keys remain for ops/Postman only. See [`progress.md`](./progress.md) Phase 15 and ADR-17 in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+**Login:** Email/password and Google Sign-In (`/login`, `/register`). Secret Manager API keys remain for ops/Postman only. See [`progress.md`](./progress.md) Phase 15 and ADR-17 in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ### Services
 

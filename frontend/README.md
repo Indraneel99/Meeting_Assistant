@@ -41,7 +41,7 @@ Copy `.env.example` to `.env`. Auth session is managed via `/login` when the API
 | `VITE_USER_EXTERNAL_ID` | Default user ID when auth is disabled |
 | `VITE_USER_EMAIL` | Default email when auth is disabled |
 
-When `MEETING_ASSISTANT_AUTH_ENABLED=true`, use **Sign in** on `/login` (Phase 15: email/password or Google). Until Phase 15 ships, the legacy panel exchanges a scoped API key for JWT (`POST /api/v1/auth/login`). Set `MEETING_ASSISTANT_AUTH_JWT_SECRET` on the API. For local dev without keys, enable `MEETING_ASSISTANT_AUTH_LOGIN_ALLOW_DEV=true`.
+When `MEETING_ASSISTANT_AUTH_ENABLED=true`, sign in at `/login` with email/password or Google. Set `MEETING_ASSISTANT_AUTH_JWT_SECRET` on the API. For local dev without a real login provider, enable `MEETING_ASSISTANT_AUTH_LOGIN_ALLOW_DEV=true`. Ops scripts can still exchange an API key at `POST /api/v1/auth/login`; that form is not in the browser UI.
 
 ## Integrations settings
 
